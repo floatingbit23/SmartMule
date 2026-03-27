@@ -24,6 +24,16 @@ INCOMING_PATH: Path = Path(os.getenv("INCOMING_PATH", r"C:\Users\Javi\eMule\Inco
 # Está en la misma partición que Incoming, así que puedo hacer os.rename() atómico
 LIBRARY_PATH: Path = Path(os.getenv("LIBRARY_PATH", r"C:\Users\Javi\eMule\SmartMule\Library"))
 
+# === Parámetros del hashing ED2K ===
+
+# Tamaño de bloque del algoritmo ED2K (estándar fijo, NO configurable por el usuario).
+# Este valor está definido por el protocolo eDonkey y no debe cambiarse NUNCA.
+ED2K_CHUNK_SIZE: int = 9_728_000  # 9,728,000 bytes = exactamente 9.28 MB
+
+# Ruta a la base de datos SQLite donde guardo el historial de hashes procesados.
+# La BBDD vive dentro de Library para ser parte de la "biblioteca" del usuario.
+DB_PATH: Path = LIBRARY_PATH / "smartmule.db"
+
 
 # === Parámetros del Watcher (debouncing) ===
 
@@ -86,13 +96,39 @@ class ColoredFormatter(logging.Formatter):
     RED = "\033[91m"
     YELLOW = "\033[93m"
     GREEN = "\033[92m"
+    
+    # Colores para módulos
+    BLUE = "\033[94m"     # main
+    CYAN = "\033[96m"     # watcher
+    MAGENTA = "\033[95m"  # queue_manager
+    WHITE = "\033[97m"    # hasher
+    GREY = "\033[37m"     # database
+    
+    # Mapeo de colores por nombre de logger
+    COMPONENT_COLORS = {
+        "SmartMule.main": BLUE,
+        "SmartMule.watcher": CYAN,
+        "SmartMule.queue_manager": MAGENTA,
+        "SmartMule.hasher": WHITE,
+        "SmartMule.database": GREY,
+    }
 
     def format(self, record):
-        # Primero formateo el mensaje base usando el formato estándar
+        # Guardamos el nombre original para restaurarlo después (por si hay otros handlers)
+        original_name = record.name
+        
+        # Aplicamos el color al nombre del componente
+        comp_color = self.COMPONENT_COLORS.get(original_name, "")
+        if comp_color:
+            record.name = f"{comp_color}{original_name}{self.RESET}"
+
+        # Formateamos el mensaje base usando el formato estándar
         log_message = super().format(record)
         
-        # Convierto el mensaje a string para comprobar si empieza por un emoji específico.
-        # Solo aplico color si el mensaje empieza por los emojis de estado.
+        # Restauramos el nombre original
+        record.name = original_name
+        
+        # Lógica de colores por nivel/emojis (como antes)
         msg_str = str(record.msg) if record.msg else ""
         
         if msg_str.startswith("❌"):

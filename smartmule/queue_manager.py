@@ -14,11 +14,16 @@ Esto da la sensación de que SmartMule es rápido, porque los archivos pequeños
 import os
 import time
 import logging
+from datetime import datetime
 import threading
 from queue import PriorityQueue
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+from smartmule.hasher import calculate_ed2k, format_ed2k_link
+from smartmule.database import HashDatabase
+from smartmule.config import DB_PATH
 
 # Creo un logger específico para este módulo.
 logger = logging.getLogger("SmartMule.queue_manager")
@@ -81,18 +86,28 @@ class QueueManager:
     def __init__(self, process_callback: Optional[Callable] = None):
 
         """
-        Inicializo la cola de prioridad y arranco el Worker Thread.
+        Inicializo la cola de prioridad, la base de datos SQLite y arranco el Worker Thread.
 
-     process_callback: Función que se llamará para procesar cada archivo.
-        Recibe un FileTask como argumento. Si es None, uso un placeholder que solo loguea el archivo
-        (útil para la implementación inicial, donde aún no tengo el pipeline completo de hashing/IA).
+        process_callback: Función opcional para procesar cada archivo.
+        Si es None, uso el pipeline real (hasher ED2K + caché SQLite).
         """
 
         # La PriorityQueue de Python es thread-safe por defecto (no necesito locks adicionales para put() y get()).
         self._queue: PriorityQueue = PriorityQueue()
 
-        # Guardo el callback de procesamiento. En esta implementación será un placeholder, y en implementaciones posteriores se sustituirá por el pipeline completo.
-        self._process_callback = process_callback or self._default_process
+        # Lock para proteger el acceso al conjunto de rutas activas.
+        self._lock = threading.Lock()
+
+        # Conjunto de archivos que ya están en la cola o siendo procesados actualmente.
+        # Lo uso para evitar duplicados si el Watcher y el Scan Inicial detectan lo mismo.
+        self._active_paths: set[str] = set()
+
+        # Abro la base de datos (BBDD) SQLite de caché. Se crea automáticamente si no existe.
+        self._db = HashDatabase(DB_PATH)
+
+        # Guardo el callback de procesamiento.
+        # Si se pasa un callback externo (útil para tests), lo uso. Si no, uso el pipeline real.
+        self._process_callback = process_callback or self._process_file
 
         # Flag para señalar al Worker que debe detenerse. Uso un Event en vez de un bool simple porque es thread-safe.
         self._stop_event = threading.Event()
@@ -117,6 +132,17 @@ class QueueManager:
         Args:
             file_path: Ruta completa al archivo que quiero procesar.
         """
+
+        # Normalizo la ruta para que el chequeo de duplicados sea exacto.
+        abs_path = str(file_path.resolve())
+
+        with self._lock:
+            # Si el archivo ya está en la cola o siendo procesado, lo ignoro silenciosamente.
+            if abs_path in self._active_paths:
+                return
+            
+            # Registro el archivo como "activo".
+            self._active_paths.add(abs_path)
 
         try:
             # Obtengo el tamaño del archivo para calcular la prioridad.
@@ -147,7 +173,7 @@ class QueueManager:
         size_str = self._format_size(file_size)
 
         logger.info(
-            f"ℹ️  Encolado [P{priority}]: {file_path.name} ({size_str}) "
+            f"✅ Encolado [P{priority}]: {file_path.name} ({size_str}) "
             f"— {self.pending_count} tarea(s) en cola"
         )
 
@@ -247,47 +273,108 @@ class QueueManager:
 
             # Bloque finally: se ejecuta SIEMPRE, tanto si hubo error como si no.
             finally: 
+                # Pase lo que pase, libero la ruta del registro de activos.
+                with self._lock:
+                    # task puede ser None si falló el get(), pero aquí ya sabemos que es un FileTask
+                    if task is not None:
+                        abs_path = str(Path(task.file_path).resolve())
+                        self._active_paths.discard(abs_path)
+
                 self._queue.task_done() # Marco la tarea como completada (necesario para que join() funcione correctamente)
 
         # Cuando el bucle termina (porque stop_event está activo), salgo del método.
         logger.info("ℹ️  Worker detenido limpiamente")
 
 
-    # Placeholder de procesamiento para la implementación inicial
-    def _default_process(self, task: FileTask) -> None:
+    # Método que procesa el archivo
+    def _process_file(self, task: FileTask) -> None:
 
         """
-        Placeholder de procesamiento para la implementación inicial. 
-        Simplemente logueo la información del archivo. 
-        En implementaciones posteriores, este callback será reemplazado por el pipeline completo:
-        hash ED2K → IA → API → mover/renombrar.
+        Pipeline de procesamiento del archivo. De momento lo que hace es:
+        1. Comprueba la caché por metadatos (Ruta + Tamaño + MTime) para evitar hashing.
+        2. Si no está en caché, calcula el hash ED2K.
+        3. Guarda el hash y los metadatos en la caché.
+
+        En implementaciones posteriores se añadirán aquí las fases de IA y APIs de metadatos.
 
         Args:
             task: La tarea de archivo a procesar.
         """
 
-        file_name = Path(task.file_path).name
+        file_path = Path(task.file_path)
+        file_name = file_path.name
         size_str = self._format_size(task.file_size)
         wait_time = time.time() - task.enqueued_at
+
+        # Obtengo el mtime (última modificación) del archivo para la caché de metadatos.
+        try:
+            file_mtime = file_path.stat().st_mtime
+        except OSError:
+            file_mtime = 0 # Valor por defecto si no puedo leerlo
 
         logger.info(
             f"ℹ️  Procesando [P{task.priority}]: {file_name} ({size_str}) "
             f"— esperó {wait_time:.1f}s en cola"
         )
 
-        logger.info(
-            f"  [PLACEHOLDER] Aquí se ejecutará: "
-            f"hash ED2K → IA → API → mover/renombrar"
-        )
+        # === FASE 0: Comprobación de Caché por Metadatos ===
+        
+        # Si el archivo (misma ruta, tamaño y mtime) ya fue procesado, no necesito recalcular el hash.
+        # Esto hace que el reinicio de SmartMule sea instantáneo para archivos ya conocidos.
+        existing = self._db.get_by_metadata(file_path, task.file_size, file_mtime)
+
+        if existing:
+            ed2k_hash = existing['ed2k_hash']
+            ed2k_link = existing['ed2k_link']
+            processed_at_raw = existing['processed_at']
+
+            # Formateo la fecha ISO de la BBDD a algo más humano (Día/Mes/Año Hora:Min:Seg)
+            try:
+                dt = datetime.fromisoformat(processed_at_raw)
+                processed_at = dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                processed_at = processed_at_raw # Por si acaso falla el parseo
+
+            logger.info(f"✅  Archivo reconocido por metadatos (mtime). Saltando hashing.")
+            logger.info(f"🔹  Hash ED2K: {ed2k_hash}")
+            logger.info(f"🔹  Link: {ed2k_link}")
+            logger.info(f"ℹ️  Archivo ya procesado el {processed_at}. Saltando pipeline de metadatos.")
+            return
+
+        # === FASE 1: Hashing ED2K ===
+
+        logger.info(f"🔹  Calculando hash ED2K de: {file_name}...")
+        hash_start = time.time() # Tomo el tiempo actual antes de calcular el hash.
+
+        ed2k_hash = calculate_ed2k(file_path)  # Bloqueante. Puede tardar minutos para archivos muy grandes.
+
+        # Formateo el tiempo transcurrido de forma legible (ej: "4min 12s" o "8s")
+        elapsed = time.time() - hash_start
+        mins, secs = divmod(int(elapsed), 60) # Devuelve una tupla (minutos, segundos)
+        elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
+
+        logger.info(f"✅  Hash ED2K calculado en {elapsed_str}: {ed2k_hash}")
+
+        # Genero el enlace ED2K estándar.
+        ed2k_link = format_ed2k_link(file_path, task.file_size, ed2k_hash)
+        logger.info(f"🔹  {ed2k_link}")
+
+        # === FASE 2: Persistencia en Caché ===
+
+        # Guardo el hash junto con los metadatos (incluyendo mtime) para que la próxima vez sea instantáneo.
+        self._db.save(file_path, task.file_size, file_mtime, ed2k_hash, ed2k_link)
+        logger.info(f"🔹  Hash guardado en caché SQLite (BBDD).")
+
+        # === FASE 3: IA + APIs (PRÓXIMAMENTE) ===
+        logger.info(f"    [PLACEHOLDER Implementación nº3] Aquí se consultará a la IA + APIs de metadatos")
 
 
     # Método para detener el Worker Thread
     def stop(self) -> None:
 
         """
-        Detengo el worker limpiamente. 
-        Envío un centinela (None) a la cola para que el worker sepa que debe terminar, y espero a que el hilo se cierre con join().
-        Llamo a _stop_event.set() primero, por si el worker está bloqueado en el timeout de get() y no ve el centinela inmediatamente.
+        Detengo el worker limpiamente.
+        Envío un centinela (None) a la cola, espero a que el hilo se cierre y cierro la BD SQLite.
         """
 
         logger.info("Deteniendo worker...")
@@ -296,12 +383,14 @@ class QueueManager:
         # El centinela 'None' hará que el Worker Thread salga del Worker Loop en el próximo get().
         self._queue.put(None)
 
-        # Espero a que el hilo termine, pero con un timeout de 10 segundos por si algo se queda colgado. 
-        # No quiero bloquear el shutdown indefinidamente.
+        # Espero a que el hilo termine, pero con un timeout de 10 segundos por si algo se queda colgado.
         self._worker_thread.join(timeout=10)
 
         if self._worker_thread.is_alive(): # Si el hilo sigue vivo después del timeout
             logger.warning("⚠️  El worker no se detuvo en 10 segundos. Forzando cierre...")
+
+        # Cierro la conexión a la base de datos SQLite limpiamente.
+        self._db.close()
 
 
     # Método para obtener el número de tareas pendientes en la cola

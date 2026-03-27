@@ -122,15 +122,22 @@ def main() -> None:
     # Los meto en la cola directamente sin pasar por el debounce.
     watcher.scan_existing()
 
-    # === 7. Inicio de monitorización ===
+    # === 7. Procesamiento inicial ===
 
-    # Arranco el Observer. 
-    # A partir de aquí, cualquier archivo nuevo que llegue a Incoming será detectado y encolado automáticamente.
+    # Antes de seguir, espero a que el trabajador termine de procesar los archivos encontrados en el scan inicial.
+    # De esta forma los logs de procesamiento no se mezclan con el mensaje de "SmartMule está corriendo".
+    if not queue_manager._queue.empty():
+        logger.info("🔹  Procesando archivos del escaneo inicial...")
+        queue_manager._queue.join() # Bloquea hasta que task_done() se llame para todos los elementos.
+
+    # === 8. Inicio de monitorización ===
+
+    # Arranco el Observer para detectar archivos nuevos en tiempo real. 
     watcher.start()
 
     logger.info("\nℹ️  SmartMule está corriendo. Pulsa Ctrl+C para detener.")
 
-    # === 8. Bucle principal ===
+    # === 9. Bucle principal ===
 
     # Mantengo el programa vivo esperando la señal de interrupción.
     # El trabajo real lo hacen los hilos del Observer y del Worker Thread.

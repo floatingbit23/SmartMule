@@ -11,3 +11,9 @@ python-dotenv>=1.0.0
 
 # Framework de testing
 pytest>=7.0.0
+
+# === Reto 2: Hashing ED2K ===
+
+# Librería criptográfica que incluye la implementación del algoritmo MD4
+# (necesario para el hash ED2K, ya que Python 3.9+ eliminó MD4 de hashlib)
+pycryptodome>=3.20.0
