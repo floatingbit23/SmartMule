@@ -1,0 +1,13 @@
+# === SmartMule - Dependencias ===
+
+# Monitorización del sistema de archivos (usa ReadDirectoryChangesW en Windows)
+watchdog>=4.0.0
+
+# Control de prioridad de I/O del proceso en Windows
+psutil>=5.9.0
+
+# Carga de variables de entorno desde archivo .env
+python-dotenv>=1.0.0
+
+# Framework de testing
+pytest>=7.0.0
