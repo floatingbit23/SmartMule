@@ -19,6 +19,7 @@ Implemento la lectura por búfer para no cargar archivos de varios GB en la RAM.
 Esto es crítico para SmartMule, que puede necesitar procesar archivos de >20 GB.
 """
 
+import sys
 import logging
 import time
 import threading
@@ -58,13 +59,20 @@ def calculate_ed2k(file_path: Path) -> str:
     # Función interna que se ejecutará cada 2 segundos para informar del progreso
     def _log_progress():
 
-        """Logueo el tiempo transcurrido y me reprogramo para 2 segundos más."""
+        """Actualizo el tiempo transcurrido en la misma línea de la terminal para no saturar los logs."""
 
         elapsed = time.time() - start_time
         mins, secs = divmod(int(elapsed), 60)
         elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
 
-        logger.info(f"🔹  Calculando hash ED2K... ({elapsed_str} transcurrido(s))")
+        # Reconstruyo el formato del log manualmente para poder usar '\r' (retorno de carro)
+        # y que el tiempo se actualice en la misma línea sin saltar a la siguiente.
+        # \033[97m es el blanco para hasher. \033[0m es el reset.
+        now = time.strftime("%H:%M:%S")
+        output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m]  🔹  Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
+        
+        sys.stdout.write(output)
+        sys.stdout.flush()
 
         # Me reprogramo para el siguiente log en 2 segundos
         t = threading.Timer(2.0, _log_progress)
@@ -124,6 +132,10 @@ def calculate_ed2k(file_path: Path) -> str:
         # Me aseguro de cancelar el timer de progreso pase lo que pase (éxito o error).
         for t in timer_ref:
             t.cancel() # Cancelo el timer
+        
+        # Al terminar, imprimo un salto de línea para que el siguiente log no escriba encima.
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 # Función que formatea el enlace ED2K
 def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:
@@ -143,5 +155,6 @@ def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:
     Returns:
         String con el enlace ED2K completo.
     """
-
-    return f"ed2k://|file|{file_path.name}|{file_size}|{hash_hex}|/"
+    
+    # Ejemplo: ed2k://|file|El.último.duelo.(2021).(Spanish.English.Subs).WEB-DL.1080p.HEVC.10b-E-AC3.by.mDudikoff.mkv|3122845276|9F977D83E2DFAD6F213F59703BDC5146|/
+    return f"ed2k://|file|{file_path.name}|{file_size}|{hash_hex}|/" 

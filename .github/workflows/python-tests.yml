@@ -1,0 +1,43 @@
+name: SmartMule Python Tests
+
+# Este workflow se activará cada vez que alguien haga "push" a la rama main o mande una "pull request".
+# Es el guardia de seguridad que vigila que cada cambio de código no rompa los tests.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    # Usamos Ubuntu para ejecutar los tests porque es la plataforma más rápida y eficiente de GitHub Actions.
+    # Aunque SmartMule esté enfocado a Windows (por eMule), el código core es multiplataforma 
+    # y psutil/pycryptodome se encargan de las diferencias.
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Probamos en las últimas versiones estables de Python
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - name: 📥 Clonar repositorio
+      uses: actions/checkout@v4
+
+    - name: 🐍 Configurar Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: 🧪 Ejecutar tests con Pytest
+      run: |
+        # Ejecutamos todos los tests recursivamente en la carpeta tests/
+        # Usamos -v para ver los detalles de cada test en los logs de GitHub.
+        python -m pytest tests/ -v

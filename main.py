@@ -72,19 +72,14 @@ def main() -> None:
     # Configuro el logging lo antes posible para que cualquier error posterior se registre correctamente.
     setup_logging()
 
-    # Muestro el banner de inicio con el burro de eMule en ASCII art.
-    # Me inspiré en el logo clásico: orejas largas, ojos saltones,
-    # hocico grande con la lengua fuera, y las patas delanteras visibles.
-    banner = r"""
-    +===================================+
-    |  SmartMule 🫏                        |
-    |  El Bibliotecario Inteligente P2P |
-    +===================================+
-"""
-    # Muestro el banner de inicio con el burro de eMule en ASCII art.
-    # Lo imprimo como un único bloque para que el ASCII art se vea bien.
-    # El banner ya incluye sus saltos de línea internos.
-    logger.info(banner.strip())
+    # Muestro el banner de inicio en color azul (color de main).
+    # Lo imprimo directamente sin el logger para que no se vea el prefijo de tiempo ni [SmartMule.main],
+    # haciendo que luzca como una cabecera limpia y centrada.
+    banner = r"""+===================================+
+|  SmartMule 🫏                    |
+|  El Bibliotecario Inteligente P2P |
++===================================+"""
+    print(f"\033[94m{banner}\033[0m\n")
  
     # === 2. Validación de rutas ===
  
@@ -135,7 +130,8 @@ def main() -> None:
     # Arranco el Observer para detectar archivos nuevos en tiempo real. 
     watcher.start()
 
-    logger.info("\nℹ️  SmartMule está corriendo. Pulsa Ctrl+C para detener.")
+    print("\n")
+    logger.info("ℹ️  SmartMule está corriendo. Pulsa Ctrl+C para detener.")
 
     # === 9. Bucle principal ===
 

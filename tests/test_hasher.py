@@ -30,8 +30,8 @@ def _write_temp_file(data: bytes) -> Path:
 
 
 def _md4_hex(data: bytes) -> str:
-    """Calculo el MD4 de unos datos y devuelvo el digest en hexadecimal."""
-    return MD4.new(data).hexdigest()
+    """Calculo el MD4 de unos datos y devuelvo el digest en hexadecimal (en MAYÚSCULAS)."""
+    return MD4.new(data).hexdigest().upper()
 
 
 def _md4_bytes(data: bytes) -> bytes:
@@ -164,7 +164,7 @@ class TestCalculateED2K:
             result = calculate_ed2k(file_path)
             assert isinstance(result, str)
             assert len(result) == 32
-            assert all(c in "0123456789abcdef" for c in result)
+            assert all(c in "0123456789ABCDEF" for c in result)
         finally:
             os.unlink(file_path)
 
@@ -216,7 +216,7 @@ class TestFormatED2KLink:
         """
         file_path = Path("C:/Incoming/Matrix.1999.mkv")
         file_size = 2_912_345_678
-        hash_hex = "a3f7b8c9d0e1f2a3b4c5d6e7f8a9b0c1"
+        hash_hex = "A3F7B8C9D0E1F2A3B4C5D6E7F8A9B0C1"
 
         result = format_ed2k_link(file_path, file_size, hash_hex)
 
