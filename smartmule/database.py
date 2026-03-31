@@ -1,28 +1,27 @@
 """
-database.py — Caché SQLite para los hashes ED2K procesados por SmartMule.
+Caché SQLite para los hashes ED2K procesados por SmartMule.
 
-Uso SQLite (incluido en Python estándar) para persistir los hashes de los archivos
-ya procesados. Esto me permite:
-
+Uso la BBDD Relacional ligera SQLite (v3.46.0) para persistir los hashes de los archivos ya procesados. 
+Esto me permite:
 1. Evitar recalcular el hash de un archivo que ya fue procesado anteriormente.
 2. Mantener un historial de todos los archivos que SmartMule ha gestionado.
-3. Consultar en retos posteriores si un archivo concreto ya fue clasificado.
+3. Consultar en implementaciones posteriores si un archivo concreto ya fue clasificado.
 
-La base de datos (BBDD) es un archivo único ('smartmule.db') en la carpeta Library.
-No necesita un servidor, no tiene dependencias externas y se crea automáticamente
-si no existe.
+La base de datos (BBDD) es un archivo único ('smartmule.db') en la carpeta Library (reside en el disco duro del usuario, memoria persistente).
+No necesita un servidor, no tiene dependencias externas y se crea automáticamente si no existe. 
 """
 
-import sqlite3
+import sqlite3 
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
+from typing import Optional # Para indicar que una función puede devolver None
+ 
 logger = logging.getLogger("SmartMule.database")
 
 
 class HashDatabase:
+
     """
     Gestiono la caché SQLite de hashes ED2K procesados.
 
@@ -34,64 +33,82 @@ class HashDatabase:
     - La fecha y hora en que fue procesado.
     """
 
-    # Sentencia SQL para crear la tabla si no existe.
+    # Sentencia SQL para crear la tabla si no existe
     # Uso 'CREATE TABLE IF NOT EXISTS' para que sea idempotente (se puede llamar múltiples veces sin error).
+    
     _CREATE_TABLE_SQL = """
         CREATE TABLE IF NOT EXISTS hashes (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path    TEXT NOT NULL,
-            file_name    TEXT NOT NULL,
-            file_size    INTEGER NOT NULL,
-            file_mtime    REAL NOT NULL DEFAULT 0,
-            ed2k_hash    TEXT NOT NULL,
-            ed2k_link    TEXT NOT NULL,
-            processed_at TEXT NOT NULL
+            id           INTEGER PRIMARY KEY AUTOINCREMENT, -- Identificador único de cada registro
+            file_path    TEXT NOT NULL, -- Ruta completa del archivo
+            file_name    TEXT NOT NULL, -- Nombre del archivo
+            file_size    INTEGER NOT NULL, -- Tamaño del archivo en bytes
+            fingerprint  TEXT NOT NULL DEFAULT '', -- Huella digital SHA256 del contenido
+            ed2k_hash    TEXT NOT NULL, -- Hash ED2K en formato hexadecimal
+            ed2k_link    TEXT NOT NULL, -- Enlace ed2k:// generado
+            processed_at TEXT NOT NULL -- Fecha y hora en que fue procesado
         );
     """
 
-    # Migración: Me aseguro de que la columna file_mtime exista (por si el usuario ya tenía la DB de antes)
-    _MIGRATE_SQL = "ALTER TABLE hashes ADD COLUMN file_mtime REAL NOT NULL DEFAULT 0;"
+    # Migración: Me aseguro de que la columna fingerprint exista
+    _MIGRATE_FINGERPRINT_SQL = "ALTER TABLE hashes ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';"
 
-    # Índice sobre el hash para que las búsquedas sean O(log n) en lugar de O(n).
+
+    # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
+    # NO es UNIQUE para evitar riesgo de colisiones de hashes SHA256 (aunque sean muy improbables).
     _CREATE_INDEX_SQL = """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_ed2k_hash ON hashes (ed2k_hash);
+        CREATE INDEX IF NOT EXISTS idx_fingerprint_size ON hashes (fingerprint, file_size);
     """
 
+    # Constructor
     def __init__(self, db_path: Path):
+
         """
         Abro (o creo) la base de datos (BBDD) SQLite y me aseguro de que la tabla existe.
 
         Args:
-            db_path: Ruta al archivo .db (se crea automáticamente si no existe).
+            db_path: Ruta al archivo .db (se crea si no existe)
         """
 
         # Me aseguro de que el directorio padre existe antes de crear el archivo .db.
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Abro la conexión. 'check_same_thread=False' es necesario porque la BBDD
-        # es instanciada en el hilo principal pero usada en el Worker Thread.
+        # Abro la conexión con la BBDD SQLite.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
 
+        # 'check_same_thread=False' es necesario porque la BBDD 
+        # es instanciada en el Main Thread (QueueManager._db) pero usada en el Worker Thread (_worker_loop._process_file._db.save())
+
         # Configuro SQLite para que devuelva filas que se comportan como diccionarios.
-        # Así puedo acceder a las columnas por nombre (ej: row['ed2k_hash']) en lugar de por índice.
         self._conn.row_factory = sqlite3.Row
+        # Así podré acceder a las columnas por nombre (ej: row['ed2k_hash']) en lugar de por índice.
 
-        # Creo la tabla y el índice si no existen.
+
+        # 1º. Creo la tabla si no existe.
         self._conn.execute(self._CREATE_TABLE_SQL)
-        self._conn.execute(self._CREATE_INDEX_SQL)
         
-        # Intento la migración por si la BBDD es antigua (si falla porque ya existe la columna, no pasa nada).
-        try:
-            self._conn.execute(self._MIGRATE_SQL)
-        except sqlite3.OperationalError:
-            pass # La columna ya existía
 
+        # 2º. MIGRACIONES: Aseguro que las columnas necesarias existan antes de indexar
+
+        for sql in [self._MIGRATE_FINGERPRINT_SQL]: # Lista de sentencias SQL de migración
+            try:
+                self._conn.execute(sql) # Ejecuto la sentencia SQL
+            except sqlite3.OperationalError: 
+                pass # Si hay error, lo ignoro (la columna ya existía)
+
+
+        # 3º. ÍNDICES: Ahora que las columnas existen seguro, creo el índice si no existe.
+        self._conn.execute(self._CREATE_INDEX_SQL)
+
+
+        # 4º. Confirmo los cambios en la BBDD.
         self._conn.commit()
 
         logger.debug(f"🔹  Base de datos SQLite abierta en: {db_path}")
 
+    # Funciones de consulta
 
     def get_by_hash(self, ed2k_hash: str) -> Optional[dict]:
+
         """
         Busco un archivo en la caché por su hash ED2K.
 
@@ -102,69 +119,71 @@ class HashDatabase:
             Diccionario con los datos del registro si existe, None si no está en caché.
         """
 
-        cursor = self._conn.execute(
-            "SELECT * FROM hashes WHERE ed2k_hash = ?",
-            (ed2k_hash,)
+        # Consulta SQL que busca un archivo por su hash ED2K
+        cursor = self._conn.execute( 
+            "SELECT * FROM hashes WHERE ed2k_hash = ?", # uso placeholder '?' para evitar inyección SQL
+            (ed2k_hash,) # tupla de 1 elemento
         )
-        row = cursor.fetchone()
+
+        row = cursor.fetchone() # Obtengo el primer (y único) resultado
 
         # Convierto el sqlite3.Row a un diccionario ordinario para que sea más cómodo de usar.
         return dict(row) if row else None
 
 
-    def get_by_metadata(self, file_path: Path, file_size: int, file_mtime: float) -> Optional[dict]:
-        """
-        Busco un archivo en la caché por sus metadatos (ruta + tamaño + fecha modificación).
+    def get_by_fingerprint(self, fingerprint: str, file_size: int) -> Optional[dict]:
 
-        Esto permite saltarse el cálculo del hash (que es lento) si el archivo no ha cambiado.
+        """
+        Busco un archivo en la caché por su Fingerprint y tamaño.
+        Esta es la forma más rápida y robusta de identificar un archivo incluso si ha sido renombrado o movido.
 
         Args:
-            file_path: Ruta completa.
-            file_size: Tamaño en bytes.
-            file_mtime: Timestamp de última modificación.
+            fingerprint: El hash SHA256 de la huella digital.
+            file_size: Tamaño del archivo para mayor seguridad ante colisiones.
 
         Returns:
-            Registro de la BBDD si hay coincidencia exacta, None en caso contrario.
+            Registro de la BBDD si hay coincidencia, None en caso contrario.
         """
 
+        # Consulta SQL que busca un archivo por su huella digital y tamaño
         cursor = self._conn.execute(
-            "SELECT * FROM hashes WHERE file_path = ? AND file_size = ? AND file_mtime = ?",
-            (str(file_path), file_size, file_mtime)
+            "SELECT * FROM hashes WHERE fingerprint = ? AND file_size = ?",
+            (fingerprint, file_size)
         )
+
         row = cursor.fetchone()
+
         return dict(row) if row else None
 
-
+    # Función de guardado en la BBDD SQLite
     def save(
         self,
         file_path: Path,
         file_size: int,
-        file_mtime: float,
+        fingerprint: str,
         ed2k_hash: str,
         ed2k_link: str,
-    ) -> None:
+    ) -> None: 
+
         """
         Guardo un nuevo registro de archivo procesado en la caché (BBDD).
 
-        Uso 'INSERT OR REPLACE' para que si el hash ya existe (por ejemplo, si el mismo
-        archivo se procesa dos veces), se borre el antiguo y se guarde el nuevo con los
-        metadatos actualizados (mtime).
-
         Args:
-            file_path: Ruta completa al archivo procesado.
-            file_size: Tamaño del archivo en bytes.
-            file_mtime: Timestamp de última modificación.
-            ed2k_hash: Hash ED2K en formato hexadecimal.
-            ed2k_link: Enlace ed2k:// generado para el archivo.
+            file_path: Ruta completa.
+            file_size: Tamaño en bytes.
+            fingerprint: Huella digital SHA256 del contenido.
+            ed2k_hash: Hash ED2K.
+            ed2k_link: Enlace ed2k://.
         """
 
-        # Uso ISO 8601 con zona horaria UTC para el timestamp.
-        processed_at = datetime.now(timezone.utc).isoformat()
+        # Uso ISO 8601 con la zona horaria local del usuario para el timestamp.
+        processed_at = datetime.now().astimezone().isoformat()
 
+        # Consulta SQL que inserta o reemplaza un registro en la tabla 'hashes'
         self._conn.execute(
             """
             INSERT OR REPLACE INTO hashes
-                (file_path, file_name, file_size, file_mtime, ed2k_hash, ed2k_link, processed_at)
+                (file_path, file_name, file_size, fingerprint, ed2k_hash, ed2k_link, processed_at)
             VALUES
                 (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -172,22 +191,25 @@ class HashDatabase:
                 str(file_path),
                 file_path.name,
                 file_size,
-                file_mtime,
+                fingerprint,
                 ed2k_hash,
                 ed2k_link,
                 processed_at,
             )
         )
+
         self._conn.commit()
 
         logger.debug(f"🔹  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
 
-
+    # Función de cierre de la BBDD SQLite
     def close(self) -> None:
+
         """
         Cierro la conexión a la base de datos (BBDD) SQLite limpiamente.
-        Llamo a esto durante el shutdown de SmartMule.
+        Llamo a este método durante el shutdown de SmartMule.
         """
 
-        self._conn.close()
+        self._conn.close() # Cierro la conexión
+        
         logger.debug("🔹  Conexión a la BBDD SQLite cerrada.")

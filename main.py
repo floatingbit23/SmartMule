@@ -1,5 +1,5 @@
 """
-main.py — Punto de entrada de SmartMule.
+Punto de entrada de SmartMule.
 
 Aquí orquesto todos los componentes de la implementación inicial:
 1. Cargo la configuración desde .env
@@ -67,10 +67,18 @@ def main() -> None:
     Función principal de SmartMule. Arranco todo, hago el scan inicial y mantengo el programa corriendo hasta que el usuario pulse Ctrl+C.
     """
 
+    # === 0. Argumentos de Línea de Comandos ===
+    import argparse
+    parser = argparse.ArgumentParser(description="SmartMule - El Bibliotecario Inteligente P2P")
+    parser.add_argument("--debug", action="store_true", help="Habilita los logs de nivel DEBUG (más detallados)")
+    args = parser.parse_args()
+
     # === 1. Logging ===
 
     # Configuro el logging lo antes posible para que cualquier error posterior se registre correctamente.
-    setup_logging()
+    # Si se pasa --debug por comando, forzamos el nivel DEBUG.
+    log_level = "DEBUG" if args.debug else None
+    setup_logging(level=log_level)
 
     # Muestro el banner de inicio en color azul (color de main).
     # Lo imprimo directamente sin el logger para que no se vea el prefijo de tiempo ni [SmartMule.main],
@@ -101,10 +109,10 @@ def main() -> None:
 
     # === 4. QueueManager ===
 
-    # Creo la PriorityQueue y arranco el Worker Thread.
-    # En la implementación inicial, el callback de procesamiento es un placeholder que solo loguea. 
-    # En implementaciones posteriores se sustituirá por el pipeline completo.
-    queue_manager = QueueManager()
+    # Creo la PriorityQueue. 
+    # El worker NO arranca inmediatamente para evitar que sus logs de procesamiento 
+    # se mezclen con los logs de encolado del escaner inicial.
+    queue_manager = QueueManager(auto_start=False)
 
     # === 5. Watcher ===
 
@@ -118,6 +126,9 @@ def main() -> None:
     watcher.scan_existing()
 
     # === 7. Procesamiento inicial ===
+
+    # Ahora que todo está encolado (con sus logs agrupados en bloque), soltamos al worker.
+    queue_manager.start_worker()
 
     # Antes de seguir, espero a que el trabajador termine de procesar los archivos encontrados en el scan inicial.
     # De esta forma los logs de procesamiento no se mezclan con el mensaje de "SmartMule está corriendo".

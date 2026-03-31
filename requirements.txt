@@ -17,3 +17,8 @@ pytest>=7.0.0
 # Librería criptográfica que incluye la implementación del algoritmo MD4
 # (necesario para el hash ED2K, ya que Python 3.9+ eliminó MD4 de hashlib)
 pycryptodome>=3.20.0
+
+# === APIs y LLMs (IA) ===
+requests>=2.31.0
+google-genai>=0.3.0
+openai>=1.14.0

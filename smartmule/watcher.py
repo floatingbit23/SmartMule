@@ -1,5 +1,5 @@
 """
-watcher.py — Observador del sistema de archivos de SmartMule.
+Observador del sistema de archivos de SmartMule.
 
 Corazón de la implementación inicial del proyecto.
 
@@ -304,6 +304,7 @@ class SmartMuleWatcher:
     Expongo start(), stop() y scan_existing() para que main.py tenga una interfaz limpia y sencilla.
     """
 
+    # Constructor del SmartMuleWatcher
     def __init__(self, queue_manager: QueueManager):
 
         """
@@ -314,11 +315,11 @@ class SmartMuleWatcher:
         """
 
         # Creo el Handler que procesará los eventos del sistema de archivos.
-        self._handler = IncomingHandler(queue_manager)
+        self._handler = IncomingHandler(queue_manager) # Instancio el IncomingHandler
 
         # Creo el Observer de watchdog. 
         # Este es el componente que realmente se comunica con la API ReadDirectoryChangesW de Windows.
-        self._observer = Observer()
+        self._observer = Observer() # Instancio el Observer
 
         # Registro la carpeta Incoming para monitorización.
         # recursive=False porque Incoming es una carpeta plana (sin subcarpetas).

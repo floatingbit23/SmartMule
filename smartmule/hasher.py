@@ -1,5 +1,5 @@
 """
-hasher.py — Implementación del algoritmo de hashing ED2K para SmartMule.
+Implementación del algoritmo de hashing ED2K para SmartMule.
 
 El hash ED2K es el identificador único de un archivo en la red eDonkey/eMule.
 A diferencia de los hashes lineales (SHA256, MD5), el ED2K es un hash jerárquico
@@ -20,6 +20,7 @@ Esto es crítico para SmartMule, que puede necesitar procesar archivos de >20 GB
 """
 
 import sys
+import hashlib
 import logging
 import time
 import threading
@@ -157,4 +158,46 @@ def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:
     """
     
     # Ejemplo: ed2k://|file|El.último.duelo.(2021).(Spanish.English.Subs).WEB-DL.1080p.HEVC.10b-E-AC3.by.mDudikoff.mkv|3122845276|9F977D83E2DFAD6F213F59703BDC5146|/
-    return f"ed2k://|file|{file_path.name}|{file_size}|{hash_hex}|/" 
+    return f"ed2k://|file|{file_path.name}|{file_size}|{hash_hex}|/"
+
+# Función que calcula la huella digital del archivo
+def calculate_fingerprint(file_path: Path, file_size: int) -> str:
+
+    """
+    Calcula una 'huella digital' (fingerprint) rápida del archivo:
+    - Si el archivo es menor de 512 KB: Lee y hashea el contenido completo.
+    - Si el archivo es mayor o igual a 512 KB: lee y hashea los primeros 256 KB y los últimos 256 KB.
+
+    Esta huella se utiliza para identificar el archivo en la BBDD de forma instantánea,
+    sin necesidad de calcular el hash ED2K completo (que requiere leer todo el archivo).
+
+    Args:
+        file_path: Ruta al archivo
+        file_size: Tamaño en bytes
+
+    Returns:
+        String hexadecimal con el hash SHA256 de la huella (en MAYÚSCULAS)
+    """
+
+    sha = hashlib.sha256() # Creo el objeto SHA256
+    buffer_size = 256 * 1024  # 256 KB (tamaño del buffer)
+
+    try:
+
+        with open(file_path, "rb") as f: # Abro el archivo en modo lectura binaria
+
+            if file_size < buffer_size * 2: # Si el archivo es menor de 512 KB
+                sha.update(f.read()) # Leo y hasheo el contenido completo
+
+            else: # Si el archivo es mayor o igual a 512 KB
+                
+                sha.update(f.read(buffer_size)) # Leo los primeros 256 KB
+
+                f.seek(-buffer_size, 2) # El 2 indica que busque desde el final del archivo
+                sha.update(f.read(buffer_size)) # Leo los últimos 256 KB
+
+        return sha.hexdigest().upper() # Devuelvo el hash en formato hexadecimal y en mayúsculas
+
+    except (OSError, IOError) as e:
+        logger.error(f"❌ Error al calcular fingerprint de {file_path.name}: {e}")
+        return "" 

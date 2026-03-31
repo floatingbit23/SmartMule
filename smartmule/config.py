@@ -7,9 +7,10 @@ Valido que las rutas críticas existan al arrancar para evitar errores silencios
 
 import os # os es un módulo que permite interactuar con el sistema operativo
 import sys # sys es un módulo que permite interactuar con el intérprete de Python
-import logging # logging es un módulo que permite registrar eventos
-from pathlib import Path # Path es una clase que representa rutas de archivos y directorios
-from dotenv import load_dotenv # load_dotenv es una función que carga las variables de entorno desde un archivo .env
+import logging
+from typing import Optional
+from pathlib import Path
+from dotenv import load_dotenv
 
 # Cargo las variables de entorno desde el archivo .env que está en la raíz del proyecto
 load_dotenv(override=False)
@@ -83,6 +84,35 @@ IGNORED_EXTENSIONS: set = {
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
 
+# === APIs y LLMs ===
+
+# TMDB (The Movie Database)
+TMDB_BEARER_TOKEN: str = os.getenv("TMDB_BEARER_TOKEN", "")
+TMDB_BASE_URL: str = "https://api.themoviedb.org/3"
+
+# User-Agent genérico para APIs Comunitarias (Exigido por OpenLibrary y MusicBrainz)
+CONTACT_EMAIL_USER_AGENT: str = os.getenv("CONTACT_EMAIL_USER_AGENT", "SmartMule/1.0 (contacto@example.com)")
+
+# OpenLibrary
+OPENLIBRARY_BASE_URL: str = "https://openlibrary.org"
+
+# MusicBrainz
+MUSICBRAINZ_BASE_URL: str = "https://musicbrainz.org/ws/2"
+
+# VirusTotal (Triaje de Software)
+VIRUSTOTAL_API_KEY: str = os.getenv("VIRUSTOTAL_API_KEY", "")
+VIRUSTOTAL_BASE_URL: str = "https://www.virustotal.com/api/v3"
+
+# Parámetros HTTP Generales
+API_TIMEOUT: int = 20  # Timeout en segundos para solicitudes HTTP
+
+# LLMs (IA)
+USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "True").lower() in ("true", "1", "yes")
+LMSTUDIO_API_KEY: str = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
+LOCAL_LLM_URL: str = "http://127.0.0.1:1234/v1"
+
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
 class ColoredFormatter(logging.Formatter):
     """
     Formateador de logs que añade colores ANSI según el nivel y el contenido.
@@ -114,6 +144,13 @@ class ColoredFormatter(logging.Formatter):
     }
 
     def format(self, record):
+        # Extraemos salto de línea manual para que no rompa el prefijo (timestamp, logger)
+        has_manual_newline = False
+        msg_str = str(record.msg) if record.msg else ""
+        if msg_str.startswith("\n"):
+            has_manual_newline = True
+            record.msg = msg_str[1:] # Lo quitamos temporalmente
+
         # Guardamos el nombre original para restaurarlo después (por si hay otros handlers)
         original_name = record.name
         
@@ -125,38 +162,54 @@ class ColoredFormatter(logging.Formatter):
         # Formateamos el mensaje base usando el formato estándar
         log_message = super().format(record)
         
-        # Restauramos el nombre original
+        # Restauramos el nombre original y el mensaje
         record.name = original_name
+        record.msg = msg_str 
         
-        # Lógica de colores por nivel/emojis (como antes)
-        msg_str = str(record.msg) if record.msg else ""
-        
-        if msg_str.startswith("❌"):
-            return f"{self.RED}{log_message}{self.RESET}"
+        # Primero de todo, lógica de colores (emojis manuales) si los hay...
+        if getattr(record, 'msg', '').startswith("\n") and getattr(record, 'msg', '')[1:].startswith("❌"):
+             log_message = f"{self.RED}{log_message}{self.RESET}"
+        elif msg_str.startswith("❌"):
+            log_message = f"{self.RED}{log_message}{self.RESET}"
         elif msg_str.startswith("⚠️"):
-            return f"{self.YELLOW}{log_message}{self.RESET}"
+            log_message = f"{self.YELLOW}{log_message}{self.RESET}"
         elif msg_str.startswith("✅"):
-            return f"{self.GREEN}{log_message}{self.RESET}"
+            log_message = f"{self.GREEN}{log_message}{self.RESET}"
+            
+        # Si el usuario mandó un \n al principio del log (ej: Procesando), lo metemos antes de toda la línea (antes de la hora).
+        if has_manual_newline:
+            log_message = f"\n{log_message}"
+
+        # Petición: Todos los logs que no sean de tipo INFO tendrán un \n arriba y otro abajo.
+        if record.levelno != logging.INFO:
+            log_message = f"\n{log_message}\n"
         
         return log_message
 
 
-def setup_logging() -> logging.Logger:
+def setup_logging(level: Optional[str] = None) -> logging.Logger:
 
     """
     Configuro el sistema de logging con colores y un formato estructurado.
     Uso un StreamHandler para que los logs salgan por la consola con colores ANSI.
+    
+    Args:
+        level: Nivel de log opcional (ej: "DEBUG"). Si no se pasa, usa LOG_LEVEL de .env.
 
     Returns:
-        Logger raíz configurado con el nivel especificado en LOG_LEVEL.
+        Logger raíz configurado con el nivel especificado.
     """
+    
+    # Prioridad: nivel pasado por argumento > LOG_LEVEL de config/env > INFO (fallback)
+    target_level_str = level or LOG_LEVEL
+    target_level = getattr(logging, target_level_str.upper(), logging.INFO)
 
-    log_format = "%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s\n"
+    log_format = "%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s"
     date_format = "%H:%M:%S"
 
     # Configuro el logger raíz
     root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    root_logger.setLevel(target_level)
 
     # Limpio handlers anteriores si existen (por si se llama dos veces)
     if root_logger.hasHandlers():
