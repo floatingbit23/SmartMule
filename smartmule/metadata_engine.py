@@ -244,21 +244,45 @@ class MetadataEngine:
                     api_result = self.musicbrainz.search_audio(titulo_alternativo)
             
             if api_result:
-                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos) ---
-                # Comprobamos que el título de la API se parezca al menos un 70% al original
+                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos Avanzado) ---
                 from difflib import SequenceMatcher
-                similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
+                import unicodedata 
+                import re
+
+                def normalizar_comparacion(s):
+                    # 1. Normalizamos (NFD) para tildes
+                    # 2. Pasamos a minusculas
+                    # 3. Quitamos todo lo que no sea una letra o un numero
+                    sn = "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).lower()
+                    return re.sub(r'[^a-z0-9]', '', sn)
+
+                api_title = api_result.get("title", "")
+                api_artist = api_result.get("artist", "")
+                full_api_name = f"{api_artist} {api_title}"
                 
-                if similitud < 0.7:
-                    logger.warning(f"⚠️ [Engine] Resultado de Audio descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' no coincide con '{titulo_limpio}'")
-                    api_result = None # Invalidamos el resultado
+                # Nombres normalizados al MAXIMO (sin simbolos ni espacios)
+                search_name_clean = normalizar_comparacion(titulo_limpio)
+                full_api_clean = normalizar_comparacion(full_api_name)
+                api_title_clean = normalizar_comparacion(api_title)
+
+                # 1. Similitud con el nombre completo (Sin basura estetica)
+                # Si una vez quitado todo los caracteres son casi los mismos, es un acierto
+                similitud_completa = SequenceMatcher(None, search_name_clean, full_api_clean).ratio()
+                
+                # 2. ¿El título limpio aparece dentro del nombre del archivo limpio?
+                contiene_titulo = api_title_clean in search_name_clean and len(api_title_clean) > 2
+
+                if similitud_completa < 0.65 and not contiene_titulo:
+                    logger.warning(f"⚠️ [Engine] Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
+                    api_result = None 
                 else:
+                    # ¡Aceptado!
                     data["api_data"] = {
                         "source": "MusicBrainz",
                         "official_title": api_result.get("title"),
                         "author": api_result.get("artist"),
                         "date": api_result.get("date"),
-                        "score": api_result.get("score") # Relevancia del resultado
+                        "score": api_result.get("score") 
                     }
 
         elif media_type == "subtitles":
