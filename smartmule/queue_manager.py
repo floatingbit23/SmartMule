@@ -388,7 +388,7 @@ class QueueManager:
         mins, secs = divmod(int(elapsed), 60)
         elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
 
-        logger.info(f"\n✅  Hash ED2K calculado en {elapsed_str}: {ed2k_hash}")
+        logger.info(f"✅  Hash ED2K calculado en {elapsed_str}: {ed2k_hash}")
 
         # Genero el enlace ED2K estándar.
         ed2k_link = format_ed2k_link(file_path, task.file_size, ed2k_hash)

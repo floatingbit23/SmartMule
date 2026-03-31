@@ -193,8 +193,14 @@ def main() -> None:
     # Arranco el Observer para detectar archivos nuevos en tiempo real. 
     watcher.start()
 
-    print("\n")
-    logger.info(f"ℹ️  SmartMule está corriendo en 2º plano (PID: {os.getpid()}). 'python main.py stop' para detener.")
+    # Mensaje de operatividad (lanzado como un bloque único para evitar que se mezcle con otros logs)
+    banner_final = (
+        "\n=========================================================================\n"
+        f"🚀 SmartMule está operativo (PID: {os.getpid()}).\n"
+        "   Vigilando 'Incoming' en silencio. Usa 'python main.py stop' para detenerme.\n"
+        "========================================================================="
+    )
+    logger.info(banner_final)
 
     # === 9. Bucle principal ===
     try:

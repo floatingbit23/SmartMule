@@ -1,4 +1,5 @@
 import logging
+from typing import Any, Optional
 
 from smartmule.parsers.regex_parser import parse_filename
 from smartmule.parsers.llm_parser import parse_with_llm
@@ -6,6 +7,7 @@ from smartmule.api.tmdb_client import TMDBClient
 from smartmule.api.openlibrary_client import OpenLibraryClient
 from smartmule.api.musicbrainz_client import MusicBrainzClient
 from smartmule.api.virustotal_client import VirusTotalClient
+import re # regex
 
 logger = logging.getLogger("SmartMule.engine")
 
@@ -124,7 +126,6 @@ class MetadataEngine:
             from smartmule.parsers.media_inspector import inspect_media_file
 
             tech_info = inspect_media_file(filepath) # Información técnica del archivo
-
             actual_duration_min = tech_info.get("duration_sec", 0) // 60 # Duración en minutos
 
             # TMDB diferencia Películas de Series
@@ -134,11 +135,26 @@ class MetadataEngine:
             else:
                 logger.info("🎬 [Engine] Buscando en TMDB como Película...")
                 results = self.tmdb.search_movie(titulo_limpio, year)
-                
+
+            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
+
+            if not results:
+
+                # Obtenemos el título alternativo
+                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+
+                if titulo_alternativo:
+                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    
+                    if data.get("season"): # Si es una serie
+                        results = self.tmdb.search_tv(titulo_alternativo, year)
+                    else: # Si es una película
+                        results = self.tmdb.search_movie(titulo_alternativo, year)
+
+
             if results: # Si se encontraron resultados
                 
                 # Algoritmo de Scoring (Criterio de desempate)
-
                 best_match = results[0] # Fallback al primero
                 best_score = -1 
 
@@ -189,31 +205,61 @@ class MetadataEngine:
             logger.info("📚 [Engine] Buscando en OpenLibrary como Libro...")
             api_result = self.openlibrary.search_book(titulo_limpio)
 
+            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
+            if not api_result:
+                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+                if titulo_alternativo:
+                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    api_result = self.openlibrary.search_book(titulo_alternativo)
+
             # Si se encontró resultado
             if api_result:
-                # Guardamos los datos en el diccionario
-                data["api_data"] = {
-                    "source": "OpenLibrary",
-                    "official_title": api_result.get("title"),
-                    "author": api_result.get("author_name_str"),
-                    "date": api_result.get("first_publish_year"),
-                    "cover_id": api_result.get("cover_i"), # ID de la portada
-                    "score": api_result.get("ratings_average") # Puntuación media sobre 5
-                }
+                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos) ---
+                from difflib import SequenceMatcher
+                similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
+                
+                if similitud < 0.7:
+                    logger.warning(f"⚠️ [Engine] Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
+                    api_result = None
+                else:
+                    data["api_data"] = {
+                        "source": "OpenLibrary",
+                        "official_title": api_result.get("title"),
+                        "author": api_result.get("author_name_str"),
+                        "date": api_result.get("first_publish_year"),
+                        "cover_id": api_result.get("cover_i"), # ID de la portada
+                        "score": api_result.get("ratings_average") # Puntuación media sobre 5
+                    }
                 
         elif media_type == "audio":
 
             logger.info("🎵 [Engine] Buscando en MusicBrainz como Audio...")
             api_result = self.musicbrainz.search_audio(titulo_limpio)
+
+            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
+            if not api_result:
+                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+                if titulo_alternativo:
+                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    api_result = self.musicbrainz.search_audio(titulo_alternativo)
             
             if api_result:
-                data["api_data"] = {
-                    "source": "MusicBrainz",
-                    "official_title": api_result.get("title"),
-                    "author": api_result.get("artist"),
-                    "date": api_result.get("date"),
-                    "score": api_result.get("score") # Relevancia del resultado
-                }
+                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos) ---
+                # Comprobamos que el título de la API se parezca al menos un 70% al original
+                from difflib import SequenceMatcher
+                similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
+                
+                if similitud < 0.7:
+                    logger.warning(f"⚠️ [Engine] Resultado de Audio descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' no coincide con '{titulo_limpio}'")
+                    api_result = None # Invalidamos el resultado
+                else:
+                    data["api_data"] = {
+                        "source": "MusicBrainz",
+                        "official_title": api_result.get("title"),
+                        "author": api_result.get("artist"),
+                        "date": api_result.get("date"),
+                        "score": api_result.get("score") # Relevancia del resultado
+                    }
 
         elif media_type == "subtitles":
             logger.info("📝 [Engine] Subtítulos detectados.")
@@ -294,3 +340,16 @@ class MetadataEngine:
 
         # Devolvemos el diccionario final con toda la información recopilada
         return data
+
+
+    # Método privado para obtener el título alternativo
+    def _get_plan_b_title(self, title: str) -> Optional[str]:
+
+        """
+        Extrae la primera parte del título antes de un 'aka' (con cualquier variante de mayúsculas).
+        """
+
+        if re.search(r'\s+aka\s+', title, re.IGNORECASE): # Si el título contiene 'aka' (con cualquier variante de mayúsculas)
+            parts = re.split(r'\s+aka\s+', title, maxsplit=1, flags=re.IGNORECASE) # Dividimos por el primer 'aka' que encontremos
+            return parts[0].strip() # Devolvemos la primera parte del título
+        return None # Si no se encuentra 'aka', devolvemos None

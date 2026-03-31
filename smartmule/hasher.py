@@ -72,8 +72,9 @@ def calculate_ed2k(file_path: Path) -> str:
         now = time.strftime("%H:%M:%S")
         output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m]  🔹  Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
         
-        sys.stdout.write(output)
-        sys.stdout.flush()
+        if sys.stdout:
+            sys.stdout.write(output)
+            sys.stdout.flush()
 
         # Me reprogramo para el siguiente log en 2 segundos
         t = threading.Timer(2.0, _log_progress)
@@ -134,9 +135,10 @@ def calculate_ed2k(file_path: Path) -> str:
         for t in timer_ref:
             t.cancel() # Cancelo el timer
         
-        # Al terminar, imprimo un salto de línea para que el siguiente log no escriba encima.
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+        # Al terminar, imprimo un salto de línea para que el siguiente log no escriba encima (solo si hay consola).
+        if sys.stdout:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
 # Función que formatea el enlace ED2K
 def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:

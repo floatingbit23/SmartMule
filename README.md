@@ -1,3 +1,5 @@
+[ 🇪🇸 Castellano ](README.md) | [ 🇺🇸 English ](README_EN.md)
+
 # SmartMule 🧠
 
 ### El Bibliotecario Inteligente para el Ecosistema P2P
@@ -5,6 +7,8 @@
 **SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
 
 ![SmartMule](/images/SmartMule_Logo_Oficial.png)
+
+![Terminal](/images/terminal.png)
 
 ---
 
@@ -28,12 +32,14 @@
 ## 🛠️ Requisitos del Sistema
 
 ### 1. Dependencias de Python
+
 Instala las librerías necesarias con:
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 2. Herramientas de Sistema (OBLIGATORIO)
+
 Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 *   **FFmpeg (ffprobe)**: Necesario para extraer la duración y resolución de los videos.
@@ -70,7 +76,22 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
 
 *   **Detener**: Si necesitas pararlo, abre una terminal cualquiera (CMD o PowerShell) y ejecuta `python main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
 
-*   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log` (en la raíz del proyecto).
+*   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log` (en la raíz del proyecto). Puedes seguirlo en tiempo real en la terminal ejecutando:
+    ```powershell
+    Get-Content smartmule.log -Wait -Encoding UTF8
+    ```
+
+---
+
+## 🔗 Configuración en eMule (IMPORTANTE)
+
+Para no perder visibilidad en la red ni dejar de ganar créditos tras la organización de tus archivos, sigue estos pasos:
+
+1.  **Compartir Biblioteca**: Ve a eMule > **Opciones** > **Directorios** y marca la carpeta `Library` como directorio compartido (asegúrate de incluir sus subcarpetas).
+2.  **Privacidad**: No compartas la carpeta raíz de SmartMule, solo la carpeta `Library`. SmartMule guarda su base de datos en una carpeta oculta (`.data`) para que eMule no la indexe.
+3.  **Mantener Créditos**: Tus créditos están asociados a tu *User Identification* (Hash), no a los nombres de los archivos. Al compartir la `Library` con los archivos ya limpios y renombrados, eMule reconocerá que tienes el mismo contenido (mismo Hash ED2K) y seguirás sumando prioridad de subida.
+4.  **Actualización**: Tras el primer arranque de SmartMule, ve a la pestaña **Compartidos** de eMule y pulsa el botón **Recargar** para que los nuevos nombres aparezcan en la red al instante.
+
 
 ---
 

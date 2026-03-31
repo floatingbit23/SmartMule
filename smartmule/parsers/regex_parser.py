@@ -5,21 +5,27 @@ from pathlib import Path
 
 # Mapeo de extensiones a Media Type
 EXTENSION_MAPPING = { 
-    "video": {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".mpg", ".mpeg", ".m4v"}, # Vídeos/Películas/Series/Documentales
-    "book": {".pdf", ".epub", ".mobi", ".djvu", ".cbz", ".cbr", ".azw3"}, # Libros/Ebooks/Cómics
-    "software": {".exe", ".msi", ".bat"}, # Software/Ejecutables/Programas
-    "compressed": {".rar", ".zip", ".7z", ".iso", ".bin", ".cue"}, # Archivos comprimidos/Contenedores/ISOs
-    "subtitles": {".srt", ".vtt", ".sub", ".ass", ".ssa"}, # Subtítulos
-    "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac"}, # Audio/Música/Podcasts
-    "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".raw", ".svg", ".ico"}, # Imágenes/Fotos/Gráficos
-    "documents": {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".odt", ".ods", ".odp"} # Documentos/Ofimática
+    "video": {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".mpg", ".mpeg", ".m4v", ".ts", ".m2ts", ".ogm", ".divx", ".vob"}, # Vídeos/Películas/Series
+    "book": {".pdf", ".epub", ".mobi", ".djvu", ".cbz", ".cbr", ".azw3", ".fb2", ".azw"}, # Libros/Ebooks/Cómics
+    "software": {".exe", ".msi", ".bat", ".dmg", ".pkg", ".apk", ".deb", ".rpm", ".appx"}, # Ejecutables/Instaladores
+    "compressed": {".rar", ".zip", ".7z", ".iso", ".bin", ".cue", ".tar.gz", ".tgz", ".bz2", ".xz", ".lzma"}, # Archivos comprimidos
+    "subtitles": {".srt", ".vtt", ".sub", ".ass", ".ssa", ".lrc"}, # Subtítulos
+    "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".opus", ".wma", ".m4b", ".ape", ".mpc", ".wv"}, # Audio/Música
+    "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".raw", ".svg", ".ico"}, # Imágenes
+    "documents": {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".odt", ".ods", ".odp"}, # Documentos
+    "info": {".nfo", ".sfv", ".md5", ".sha1"} # Información y Verificación de la Escena
 }
 
 # Etiquetas de P2P comunes a eliminar (Códecs, Calidades...)
 SCENE_TAGS = [
     r"hdrip", r"web-dl", r"x264", r"x265", r"hevc", r"aac", r"ac3", r"e-ac3",
     r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
-    r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip"
+    r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
+    r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip",
+    # Audio Tags
+    r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
+    # Additional Technical Tags
+    r"h264", r"5\s*1", r"7\s*1", r"dts", r"10bit", r"multi"
 ]
 
 # hdrip = High Definition Rip
@@ -129,14 +135,20 @@ def parse_filename(filename: str) -> dict:
         clean_name = re.sub(r'(?i)\b' + tag + r'\b', ' ', clean_name)
 
     # Eliminar la firma del uploader (como "by mDudikoff" o "-GrpName")
-    clean_name = re.sub(r'(?i)\bby\s+\w+$', '', clean_name)
-    clean_name = re.sub(r'-\w+$', '', clean_name)
+    clean_name = re.sub(r'(?i)\bby\s+[\w\d-]+\b', '', clean_name)
+    clean_name = re.sub(r'-\s*\w+$', '', clean_name)
     
     # Eliminar paréntesis y corchetes que queden solos o tengan extras
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
     # Quitar palabras como "Spanish", "English", "Subs", "Dual"
     clean_name = re.sub(r'(?i)\b(spanish|spa|eng|english|subs|sub|dual|ita|iTALiAN|ita|fre|latino|castellano)\b', ' ', clean_name)
+
+    # Limpieza de dominios web (ej: savetube.me, viciao.es, etc.)
+    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|me|tv|info)\b', ' ', clean_name)
+
+    # Limpieza de resoluciones (ej: 1920x1080, 1280x720)
+    clean_name = re.sub(r'(?i)\b\d{3,4}x\d{3,4}\b', ' ', clean_name)
 
     # Limpieza final de espacios duplicados y trim
     clean_name = re.sub(r'\s+', ' ', clean_name).strip()

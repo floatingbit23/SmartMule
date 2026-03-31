@@ -1,6 +1,8 @@
 import os # Módulo para operaciones del sistema operativo
 import shutil # Módulo para operaciones con archivos y directorios
 import logging
+import re
+
 from pathlib import Path
 from smartmule.config import LIBRARY_PATH
 from smartmule.notifications import send_notification
@@ -93,9 +95,9 @@ class LibraryOrganizer:
 
             # Diccionario de mapeo de categorías
             category_mapping = {
-                "video": "Movies_and_Series",
                 "movie": "Movies_and_Series",
                 "tv series": "Movies_and_Series",
+                "video": "Video_Clips",
                 "book": "Books_and_Comics",
                 "audio": "Audio_and_Music",
                 "software": "Software",
@@ -103,26 +105,57 @@ class LibraryOrganizer:
                 "image": "Images",
                 "games": "Games",
                 "documents": "Documents",
+                "subtitles": "Subtitles",
+                "info": "Info_and_Verification",
                 "unknown": "Others"
             }
 
             folder_name = category_mapping.get(media_type, "Others") # Obtengo el nombre de la carpeta
-            # "Others" será la carpeta por defecto si no se encuentra el Media Type
-
             dest_dir = self.library_dir / folder_name # Ruta de la carpeta
-
             dest_dir.mkdir(parents=True, exist_ok=True) # Creo la carpeta si no existe
 
-            dest_path = dest_dir / filename # Ruta final del archivo
+            # --- CAPA DE EMBELLECIMIENTO (Renombrado Inteligente) ---
+            
+            # 1. Intentamos obtener el título oficial de las APIs, si no, vamos al título limpio
+
+            base_name = filename # Fallback por defecto (nombre en el P2P)
+            
+            api_data = metadata.get("api_data") 
+
+            # Si la API nos dio un título oficial, lo usamos. Si no, usamos el título limpio de Regex/LLM
+            if api_data and api_data.get("official_title"):
+                base_name = api_data["official_title"]
+            elif metadata.get("title"):
+                base_name = metadata["title"]
+
+            # 2. Añadimos el año si lo conocemos para un look profesional
+
+            year = metadata.get("year")
+            if year:
+                pretty_name = f"{base_name} ({year})"
+            else:
+                pretty_name = base_name
+
+            # 3. Saneamos el nombre (eliminamos carácteres prohibidos por el OS: : / \ * ? " < > |)
+            clean_filename = re.sub(r'[\\/:*?"<>|]', '', pretty_name).strip()
+            
+            # 4. Restauramos la extensión original
+            final_filename = f"{clean_filename}{source_path.suffix}"
+
+            # Construimos la ruta final
+            dest_path = dest_dir / final_filename
 
             # Si el archivo ya existe en destino, le añadimos un sufijo para no sobreescribir
             counter = 1
 
             while dest_path.exists():
-                dest_path = dest_dir / f"{source_path.stem}_{counter}{source_path.suffix}"
+                dest_path = dest_dir / f"{clean_filename}_{counter}{source_path.suffix}"
                 counter += 1
 
-            shutil.move(str(source_path), str(dest_path)) # Muevo el archivo
+            # Ejemplo: "The.Matrix.1999.mp4" -> "The.Matrix.1999_1.mp4"
+
+            # 5. Realizamos el movimiento/renombrado físico
+            shutil.move(str(source_path), str(dest_path))
             
             # Selecciono el emoji correspondiente a la categoría para el log final
             if folder_name == "Movies_and_Series":

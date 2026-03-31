@@ -8,6 +8,7 @@ Valido que las rutas críticas existan al arrancar para evitar errores silencios
 import os # os es un módulo que permite interactuar con el sistema operativo
 import sys # sys es un módulo que permite interactuar con el intérprete de Python
 import logging
+import logging.handlers # Para la rotación de logs
 from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
@@ -35,8 +36,8 @@ LIBRARY_PATH: Path = Path(os.getenv("LIBRARY_PATH", r"C:\Users\Javi\eMule\SmartM
 ED2K_CHUNK_SIZE: int = 9_728_000  # 9,728,000 bytes = exactamente 9.28 MB
 
 # Ruta a la base de datos SQLite donde guardo el historial de hashes procesados.
-# La BBDD vive dentro de Library para ser parte de la "biblioteca" del usuario.
-DB_PATH: Path = LIBRARY_PATH / "smartmule.db"
+# La BBDD vive dentro de una carpeta oculta dentro de Library (.data) para evitar que eMule la comparta.
+DB_PATH: Path = LIBRARY_PATH / ".data" / "smartmule.db"
 
 
 # === Parámetros del Watcher (debouncing) ===
@@ -223,19 +224,30 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
-    # Creo el handler de consola con mi formateador de colores
-    console_handler = logging.StreamHandler(sys.stdout)
-    formatter = ColoredFormatter(log_format, date_format)
-    console_handler.setFormatter(formatter)
-    
-    root_logger.addHandler(console_handler)
+    # Creo el handler de consola con mi formateador de colores (solo si hay consola disponible)
+    if sys.stdout:
+        console_handler = logging.StreamHandler(sys.stdout)
+        formatter = ColoredFormatter(log_format, date_format)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    else:
+        # En modo invisible sin stdout, nos aseguramos de que no haya un handler "None" colgando.
+        pass
 
     # === Handler para guardar logs en archivo de texto plano ===
 
     # El log se llamará 'smartmule.log' y estará en la raíz del proyecto.
-    # Usamos formato estandar sin colores para evitar "basura ANSI" en bloc de notas.
-
-    file_handler = logging.FileHandler(BASE_DIR / "smartmule.log", mode="a", encoding="utf-8")
+    # Usamos un 'RotatingFileHandler' para que el archivo no crezca indefinidamente. 
+    # MaxBytes = 5 MegaBytes (5 * 1024 * 1024). Mantendremos hasta 3 copias de backup.
+    
+    log_file = BASE_DIR / "smartmule.log"
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, 
+        maxBytes=5 * 1024 * 1024, 
+        backupCount=3, 
+        encoding="utf-8"
+    )
+    
     file_formatter = logging.Formatter("%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s", date_format)
     file_handler.setFormatter(file_formatter)
     
