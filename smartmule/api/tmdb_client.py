@@ -1,5 +1,6 @@
 import logging
 import requests
+import time # Para las esperas de reintento
 from typing import Optional
 
 from smartmule.config import TMDB_BASE_URL, TMDB_BEARER_TOKEN, API_TIMEOUT
@@ -33,24 +34,37 @@ class TMDBClient:
         # Construimos la URL
         url = f"{TMDB_BASE_URL}{endpoint}"
 
-        # Realizamos la petición HTTP GET
-        try:
-            response = requests.get(
-                url, headers=self.headers, params=params, timeout=API_TIMEOUT
-            )
-            
-            # Rate Limiting de TMDB v3
-            if response.status_code == 429: # HTTP 429: Too Many Requests
-                logger.warning("⚠️  Rate Limit de TMDB alcanzado. Abortando consulta temporalmente...")
-                return None
-                
-            response.raise_for_status() # Lanza una excepción para códigos de error HTTP (4xx o 5xx)
+        # Configuración de reintentos
+        max_retries = 3
+        retry_delays = [2, 5, 10] # Esperas entre intentos en segundos (backoff exponencial)
+        
+        # Realizamos la petición HTTP GET con reintentos
+        for attempt in range(max_retries):
 
-            return response.json() # Devuelve la respuesta en formato JSON
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Error conectando a TMDB: {e}")
-            return None
+            try:
+                response = requests.get(
+                    url, headers=self.headers, params=params, timeout=API_TIMEOUT
+                )
+                
+                # Gestión del Rate Limiting de TMDB v3
+                if response.status_code == 429: # HTTP 429: Too Many Requests
+                    wait_time = retry_delays[attempt]
+                    logger.warning(f"⚠️  Rate Limit de TMDB alcanzado. Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue # Siguiente intento del bucle
+                    
+                response.raise_for_status() # Lanza una excepción para errores persistentes
+                return response.json() # Devuelve la respuesta en formato JSON si todo está OK
+                
+            except requests.exceptions.RequestException as e:
+                # Si fallamos por red, esperamos antes de reintentar
+                if attempt < max_retries - 1:
+                    wait_time = retry_delays[attempt]
+                    logger.warning(f"⚠️  Error de red con TMDB ({e}). Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌  Error definitivo conectando a TMDB tras {max_retries} intentos: {e}")
+                    return None
 
     # Método para buscar películas
     def search_movie(self, title: str, year: Optional[int] = None) -> list:

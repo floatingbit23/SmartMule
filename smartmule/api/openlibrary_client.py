@@ -33,41 +33,53 @@ class OpenLibraryClient:
     def search_book(self, title: str) -> Optional[dict]:
         """
         Busca un libro en OpenLibrary usando el título limpio.
-        Limitamos los campos para no sobrecargar el ancho de banda.
+        Implementa reintentos para mayor resiliencia ante fallos de red.
         """
-        self._wait_for_rate_limit()
-
         endpoint = "/search.json"
         url = f"{OPENLIBRARY_BASE_URL}{endpoint}"
-        
-        # OpenLibrary prefiere hacer una sola req con los campos necesarios de work limitando a 1 resultado
         params = {
             "q": title,
             "limit": 1,
             "fields": "title,author_name,first_publish_year,cover_i,key,subject,ratings_average"
         }
 
-        try:
-            response = requests.get(
-                url, headers=self.headers, params=params, timeout=API_TIMEOUT
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and "docs" in data and len(data["docs"]) > 0:
-                book = data["docs"][0]
+        max_retries = 3
+        retry_delays = [2, 5, 10]
+
+        for attempt in range(max_retries):
+            self._wait_for_rate_limit()
+
+            try:
+                response = requests.get(
+                    url, headers=self.headers, params=params, timeout=API_TIMEOUT
+                )
+                response.raise_for_status()
+                data = response.json()
                 
+                if data and "docs" in data and len(data["docs"]) > 0:
+                    book = data["docs"][0]
+                    
                 # Transformamos la key de arreglo a string seguro si es necesario
                 # (OpenLibrary devuelve a veces author_name como array)
-                if isinstance(book.get("author_name"), list) and len(book["author_name"]) > 0:
-                    book["author_name_str"] = book["author_name"][0]
+                    if isinstance(book.get("author_name"), list) and len(book["author_name"]) > 0:
+                        book["author_name_str"] = book["author_name"][0]
+                    else:
+                        book["author_name_str"] = "Autor Desconocido"
+                    
+                    return book
+                    
+                return None
+                
+            except requests.exceptions.RequestException as e:
+
+                if attempt < max_retries - 1: # Si no es el último intento
+
+                    wait_time = retry_delays[attempt] # Espera exponencial
+                    logger.warning(f"⚠️ Error conectando a OpenLibrary ({e}). Reintentando en {wait_time}s... ({attempt + 1}/{max_retries})")
+                    time.sleep(wait_time) # Espera antes de reintentar
+
                 else:
-                    book["author_name_str"] = "Autor Desconocido"
-                
-                return book
-                
-            return None
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Error conectando a OpenLibrary: {e}")
-            return None
+                    logger.error(f"❌ Error definitivo conectando a OpenLibrary tras {max_retries} intentos: {e}")
+                    return None
+        
+        return None

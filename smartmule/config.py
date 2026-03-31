@@ -237,19 +237,20 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
     # === Handler para guardar logs en archivo de texto plano ===
 
     # El log se llamará 'smartmule.log' y estará en la raíz del proyecto.
-    # Usamos un 'RotatingFileHandler' para que el archivo no crezca indefinidamente. 
-    # MaxBytes = 5 MegaBytes (5 * 1024 * 1024). Mantendremos hasta 3 copias de backup.
+    # Usamos un 'RotatingFileHandler' para que el archivo no crezca indefinidamente
+    # Mantendremos hasta 3 copias de backup (smartmule.log.1, smartmule.log.2, smartmule.log.3)
     
     log_file = BASE_DIR / "smartmule.log"
-    file_handler = logging.handlers.RotatingFileHandler(
+
+    file_handler = logging.handlers.RotatingFileHandler( # Rotación de logs
         log_file, 
-        maxBytes=5 * 1024 * 1024, 
+        maxBytes=5 * 1024 * 1024,  # 5 MB
         backupCount=3, 
         encoding="utf-8"
     )
     
-    file_formatter = logging.Formatter("%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s", date_format)
-    file_handler.setFormatter(file_formatter)
+    file_formatter = logging.Formatter("%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s", date_format) # Formato del log
+    file_handler.setFormatter(file_formatter) # Asigna el formateador al handler
     
     root_logger.addHandler(file_handler) # Añade el handler de archivo al logger raíz
 

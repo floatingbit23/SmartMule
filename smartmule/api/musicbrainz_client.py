@@ -33,56 +33,68 @@ class MusicBrainzClient:
     def search_audio(self, title: str) -> Optional[dict]:
         """
         Busca un track/canción en MusicBrainz usando el título limpio.
-        Limitamos a 1 resultado.
+        Implementa reintentos para mayor resiliencia ante fallos de red.
         """
-        self._wait_for_rate_limit()
 
         endpoint = "/recording"
+
         url = f"{MUSICBRAINZ_BASE_URL}{endpoint}"
-        
-        # Consultamos grabaciones (recordings) por nombre
+
         params = {
             "query": title,
             "fmt": "json",
             "limit": 1
         }
 
-        try:
-            response = requests.get(
-                url, headers=self.headers, params=params, timeout=API_TIMEOUT
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            if data and "recordings" in data and len(data["recordings"]) > 0:
-                recording = data["recordings"][0]
+        max_retries = 3
+        retry_delays = [2, 5, 10]
+
+        for attempt in range(max_retries):
+            self._wait_for_rate_limit() # Siempre respetamos el límite de 1 req/s de MB
+
+            try:
+                response = requests.get(
+                    url, headers=self.headers, params=params, timeout=API_TIMEOUT
+                )
+                response.raise_for_status()
+                data = response.json()
                 
-                # Extraemos y aplanamos los datos para nuestra tarjeta
-                audio_data = {
-                    "title": recording.get("title"),
-                    "score": recording.get("score") # Relevancia del resultado (hasta 100)
-                }
-                
-                # Artista
-                if "artist-credit" in recording and len(recording["artist-credit"]) > 0:
-                    artist = recording["artist-credit"][0].get("name")
-                    audio_data["artist"] = artist
-                else:
-                    audio_data["artist"] = "Desconocido"
-                
-                # Álbum (Release) y Fecha
-                if "releases" in recording and len(recording["releases"]) > 0:
-                    first_release = recording["releases"][0]
-                    audio_data["album"] = first_release.get("title", "Sencillo/Desconocido")
-                    audio_data["date"] = first_release.get("date")
-                else:
-                    audio_data["album"] = "Sencillo/Desconocido"
-                    audio_data["date"] = None
+                if data and "recordings" in data and len(data["recordings"]) > 0:
+                    recording = data["recordings"][0]
                     
-                return audio_data
+                    audio_data = {
+                        "title": recording.get("title"),
+                        "score": recording.get("score") 
+                    }
+                    
+                    if "artist-credit" in recording and len(recording["artist-credit"]) > 0:
+                        artist = recording["artist-credit"][0].get("name")
+                        audio_data["artist"] = artist
+                    else:
+                        audio_data["artist"] = "Desconocido"
+                    
+                    if "releases" in recording and len(recording["releases"]) > 0:
+                        first_release = recording["releases"][0]
+                        audio_data["album"] = first_release.get("title", "Sencillo/Desconocido")
+                        audio_data["date"] = first_release.get("date")
+                    else:
+                        audio_data["album"] = "Sencillo/Desconocido"
+                        audio_data["date"] = None
+                        
+                    return audio_data
+                    
+                return None
                 
-            return None
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Error conectando a MusicBrainz: {e}")
-            return None
+            except requests.exceptions.RequestException as e:
+
+                if attempt < max_retries - 1: # Si no es el último intento
+
+                    wait_time = retry_delays[attempt] # Espera exponencial
+                    logger.warning(f"⚠️ Error conectando a MusicBrainz ({e}). Reintentando en {wait_time}s... ({attempt + 1}/{max_retries})")
+                    time.sleep(wait_time) # Espera antes de reintentar
+
+                else:
+                    logger.error(f"❌ Error definitivo conectando a MusicBrainz tras {max_retries} intentos: {e}")
+                    return None
+        
+        return None
