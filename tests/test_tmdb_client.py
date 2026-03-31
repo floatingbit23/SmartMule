@@ -2,6 +2,11 @@ import pytest
 from unittest.mock import patch, MagicMock
 from smartmule.api.tmdb_client import TMDBClient
 
+@pytest.fixture(autouse=True)
+def mock_env_vars():
+    with patch('smartmule.api.tmdb_client.TMDB_BEARER_TOKEN', 'test_token'):
+        yield
+
 @pytest.fixture
 def tmdb_client():
     return TMDBClient()
