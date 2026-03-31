@@ -10,7 +10,9 @@ EXTENSION_MAPPING = {
     "software": {".exe", ".msi", ".bat"}, # Software/Ejecutables/Programas
     "compressed": {".rar", ".zip", ".7z", ".iso", ".bin", ".cue"}, # Archivos comprimidos/Contenedores/ISOs
     "subtitles": {".srt", ".vtt", ".sub", ".ass", ".ssa"}, # Subtítulos
-    "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac"} # Audio/Música/Podcasts
+    "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac"}, # Audio/Música/Podcasts
+    "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".raw", ".svg", ".ico"}, # Imágenes/Fotos/Gráficos
+    "documents": {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".odt", ".ods", ".odp"} # Documentos/Ofimática
 }
 
 # Etiquetas de P2P comunes a eliminar (Códecs, Calidades...)

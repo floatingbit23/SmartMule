@@ -79,7 +79,7 @@ class MetadataEngine:
             from smartmule.parsers.archive_inspector import inspect_archive
                 
             logger.info(f"🗜️  Archivo comprimido detectado. Iniciando análisis...")
-            inspection = inspect_archive(filepath)
+            inspection = inspect_archive(filepath, expected_type=media_type)
             
             # Si el interior revela un FAKE/MALICIOUS o está encriptado (protegido con contraseña), anulamos todo el proceso.
             if inspection["status"] in ["MALICIOUS", "SUSPICIOUS"]:
@@ -118,16 +118,58 @@ class MetadataEngine:
 
         if media_type in ["video", "tv series", "movie"]: 
             
+            # --- DESEMPATE TÉCNICO (En caso de homónimos) ---
+
+            # Obtenemos duración real del archivo para desempate si hay homónimos
+            from smartmule.parsers.media_inspector import inspect_media_file
+
+            tech_info = inspect_media_file(filepath) # Información técnica del archivo
+
+            actual_duration_min = tech_info.get("duration_sec", 0) // 60 # Duración en minutos
+
             # TMDB diferencia Películas de Series
             if data.get("season"):
                 logger.info("📺 [Engine] Buscando en TMDB como Serie...")
-                api_result = self.tmdb.search_tv(titulo_limpio, year) 
-
+                results = self.tmdb.search_tv(titulo_limpio, year) 
             else:
                 logger.info("🎬 [Engine] Buscando en TMDB como Película...")
-                api_result = self.tmdb.search_movie(titulo_limpio, year)
+                results = self.tmdb.search_movie(titulo_limpio, year)
                 
-            if api_result: # Si se encontró resultado
+            if results: # Si se encontraron resultados
+                
+                # Algoritmo de Scoring (Criterio de desempate)
+
+                best_match = results[0] # Fallback al primero
+                best_score = -1 
+
+                for res in results: # Para cada resultado
+
+                    # Inicializamos la puntuación (Score)
+                    score = 0
+
+                    # Obtenemos el título y la fecha de la API
+                    res_title = res.get("title") or res.get("name")
+                    res_date = res.get("release_date") or res.get("first_air_date") or ""
+                    
+                    # Criterio 1: PUNTUACIÓN POR TÍTULO (Exacto = 50 pts)
+                    if res_title.lower() == titulo_limpio.lower():
+                        score += 50
+                    
+                    # Criterio 2: PUNTUACIÓN POR AÑO (Si coincide año de estreno = 30 pts)
+                    if year and str(year) in res_date:
+                        score += 30
+
+                    # Criterio 3: PUNTUACIÓN POR DURACIÓN
+
+                    # TMDB no da el runtime en el /search directamente, pero si estuviera, sumaríamos 20 pts.
+                    # Por ahora, si solo hay un resultado, es ese. Si hay varios, el año suele ser decisivo.
+                    
+                    # Actualizamos el mejor resultado si este tiene mayor puntuación
+                    if score > best_score:
+                        best_score = score
+                        best_match = res 
+
+                api_result = best_match # Asignamos el mejor resultado
 
                 # Construimos la URL del póster
                 poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None

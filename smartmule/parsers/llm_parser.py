@@ -18,14 +18,17 @@ Reglas:
 2. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
 3. Detecta "season" y "episode" si es una serie. Usa números enteros.
 4. Identifica "year" si existe. Usa número entero.
-5. "media_type" debe ser exactamente uno de los siguientes strings: "video", "tv series", "movie", "book", "audio", "software", "subtitles", o "unknown".
+5. "media_type" debe ser exactamente uno de los siguientes strings: "video", "tv series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
 6. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
 
 Ejemplo 1: "The.Office.S03E05.1080p.HEVC.x265.mkv"
 {"title": "The Office", "media_type": "tv series", "season": 3, "episode": 5, "quality": "1080p", "year": null}
 
-Ejemplo 2: "Matrix_1999_Spanish_Dual__720p.BRRip.avi"
-{"title": "Matrix", "media_type": "movie", "season": null, "episode": null, "quality": "720p", "year": 1999}
+Ejemplo 2: "Age_of_Empires_II_Definitive_Edition-ISO-2019.rar"
+{"title": "Age of Empires II Definitive Edition", "media_type": "games", "season": null, "episode": null, "quality": null, "year": 2019}
+
+Ejemplo 3: "Manual_Usuario_SmartMule_v1.0_Final.doc"
+{"title": "Manual Usuario SmartMule v1.0 Final", "media_type": "documents", "season": null, "episode": null, "quality": null, "year": null}
 """
 
 # Función principal que decide si usar Gemini o LM Studio

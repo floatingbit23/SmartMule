@@ -13,6 +13,7 @@ def tmdb_client():
 
 @patch('smartmule.api.tmdb_client.requests.get')
 def test_search_movie_success(mock_get, tmdb_client):
+    """Verifica que search_movie devuelve una lista de resultados cuando hay éxito."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -23,27 +24,31 @@ def test_search_movie_success(mock_get, tmdb_client):
     mock_get.return_value = mock_response
 
     result = tmdb_client.search_movie("The Matrix", 1999)
-    assert result is not None
-    assert result["title"] == "The Matrix"
+    
+    assert isinstance(result, list)
+    assert len(result) > 0
+    assert result[0]["title"] == "The Matrix"
     mock_get.assert_called_once()
 
 
 @patch('smartmule.api.tmdb_client.requests.get')
 def test_search_movie_empty(mock_get, tmdb_client):
+    """Verifica que search_movie devuelve una lista vacía si no hay resultados."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"results": []}
     mock_get.return_value = mock_response
 
     result = tmdb_client.search_movie("Not Found Movie")
-    assert result is None
+    assert result == []
 
 
 @patch('smartmule.api.tmdb_client.requests.get')
 def test_rate_limit(mock_get, tmdb_client):
+    """Verifica que search_movie devuelve una lista vacía si hay Rate Limit (429)."""
     mock_response = MagicMock()
     mock_response.status_code = 429
     mock_get.return_value = mock_response
 
     result = tmdb_client.search_movie("The Matrix")
-    assert result is None
+    assert result == []

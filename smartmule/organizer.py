@@ -96,6 +96,9 @@ class LibraryOrganizer:
                 "audio": "Audio_and_Music",
                 "software": "Software",
                 "compressed": "Archives",
+                "image": "Images",
+                "games": "Games",
+                "documents": "Documents",
                 "unknown": "Others"
             }
 
@@ -128,6 +131,12 @@ class LibraryOrganizer:
                 emoji = "💻"
             elif folder_name == "Archives":
                 emoji = "📦"
+            elif folder_name == "Images":
+                emoji = "📸"
+            elif folder_name == "Games":
+                emoji = "🎮"
+            elif folder_name == "Documents":
+                emoji = "📄"
             else:
                 emoji = "📁"
            

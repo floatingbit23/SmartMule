@@ -25,18 +25,29 @@ MEDIA_MAPPING = {
     ".epub": "book", 
     ".mobi": "book", 
     ".cbz": "book", 
-    ".cbr": "book"
+    ".cbr": "book",
+    ".doc": "documents",
+    ".docx": "documents",
+    ".xls": "documents",
+    ".xlsx": "documents",
+    ".txt": "documents",
+    ".exe": "software",
+    ".msi": "software"
 }
 
 # Función para inspeccionar archivos comprimidos
-def inspect_archive(filepath: str) -> dict:
+def inspect_archive(filepath: str, expected_type: str = "unknown") -> dict:
 
     """
     Inspecciona contenedores (.zip, .rar, .7z...) para listar su contenido. No extrae datos, solo lee el índice por motivos de seguridad y velocidad.
     
+    Args:
+        filepath: Ruta del archivo.
+        expected_type: Tipo de medio que esperamos encontrar (determinado por IA o Regex).
+
     Devuelve un diccionario con:
-    - "status": "SAFE" | "SUSPICIOUS" | "MALICIOUS" | "ERROR"  (Estado del archivo dentro del contenedor)
-    - "detected_media": "video", "audio", "book", "software" o None (Tipo de archivo detectado dentro del contenedor)
+    - "status": "SAFE" | "SUSPICIOUS" | "MALICIOUS" | "ERROR"
+    - "detected_media": "video", "audio", "book", "software", "games", "documents" o None
     """
 
     path = Path(filepath) 
@@ -108,6 +119,7 @@ def inspect_archive(filepath: str) -> dict:
 
         detected_media = None # Variable para almacenar el Media Type detectado
         has_dangerous = False # Flag para detectar archivos peligrosos
+        dangerous_files = [] # Lista para almacenar archivos peligrosos
         
         for fname in file_list: # Recorro los archivos dentro de la lista
 
@@ -117,7 +129,7 @@ def inspect_archive(filepath: str) -> dict:
             for dext in DANGEROUS_EXTS:
                 if fname_lower.endswith(dext): # Si el nombre del archivo termina en una extensión peligrosa
                     has_dangerous = True # Activo el flag de archivos peligrosos
-                    logger.warning(f"⚠️ [Inspector] ENCONTRADO ARCHIVO EJECUTABLE CAMUFLADO: {fname}")
+                    dangerous_files.append(fname)
                     break
                     
 
@@ -129,15 +141,30 @@ def inspect_archive(filepath: str) -> dict:
                         detected_media = mtype # Le asigno el Media Type correspondiente
                         break
                         
-        # Si se encontró AL MENOS 1 archivo peligroso en el contenedor
-        if has_dangerous: 
-            logger.critical(f"💀 [Inspector] ¡PELIGRO! {path.name} contiene malware encubierto.")
-            return {"status": "MALICIOUS", "detected_media": "software"}
-            
+        # --- LÓGICA DE VEREDICTO POR CONTEXTO ---
+
+        # Si NO esperamos software ni juegos, pero hay ejecutables -> MALICIOUS (Suplantación)
+
+        if has_dangerous and expected_type not in ["software", "games"]:
+             logger.critical(f"💀 [Inspector] ¡SUPLANTACIÓN! {path.name} (que debería ser {expected_type}) contiene ejecutables.")
+             return {"status": "MALICIOUS", "detected_media": "software"}
+             
+        # Si esperamos juegos o software, el ejecutable es NORMAL, pero por seguridad lo dejamos bajo sospecha o revisión si son muchos
+
+        if has_dangerous and expected_type in ["software", "games"]:
+             logger.info(f"✅ [Inspector] Ejecutables encontrados en contenedor de {expected_type}. Permitido por contexto.")
+             # No es Malicious, dejamos que VirusTotal decida después.
+             
+        # Los documentos NO deben tener ejecutables dentro de sus contenedores (si comprimidos)
+        
+        if has_dangerous and expected_type == "documents":
+             logger.critical(f"💀 [Inspector] ¡MALWARE! Documento contenedor de scripts/ejecutables detectado.")
+             return {"status": "MALICIOUS", "detected_media": "software"}
+
         # Si no se encontró ningún archivo peligroso
         logger.info(f"✅ [Inspector] Contenedor limpio. Contiene {len(file_list)} elementos.")
         
-        # Si se detectó un tipo de medio (si hay varios archivos, se toma el primer Media Type que se encuentre por orden de aparición)
+        # Si se detectó un tipo de medio
         if detected_media:
             logger.info(f"📼 [Inspector] Detectado contenido principal de tipo: {detected_media}")
             

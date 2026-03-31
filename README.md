@@ -2,63 +2,69 @@
 
 ### El Bibliotecario Inteligente para el Ecosistema P2P
 
-**SmartMule** es un servicio automatizado en segundo plano diseñado para transformar el caos de las descargas P2P (eMule) en una biblioteca de medios perfectamente estructurada. Utiliza una combinación de vigilancia del sistema de archivos, hashing criptográfico e Inteligencia Artificial para clasificar, renombrar y proteger tus archivos.
-
-## ¿Qué problemas resuelve?
-
-El problema histórico de eMule es la desorganización: archivos con nombres crípticos (ej. `Peli_1994_HDRip_x264_ES.mkv`) amontonados en una única carpeta `Incoming`. 
-
-![alt text](images/old_incoming_folder.png)
-
-SmartMule actúa como una herramienta que:
-
-1. **Vigila** constantemente tu carpeta de descargas.
-
-2. **Identifica** la identidad real del archivo mediante su "DNI digital" (su Hash ED2K).
-
-3. **Limpia** el nombre usando IA (Gemini o modelos locales).
-
-4. **Organiza** el contenido en carpetas lógicas (Películas, Series, Libros, Software), enriqueciendo los metadatos mediante APIs externas.
+**SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
 
 ---
 
-## Utilidades Principales
+## 🚀 Características Principales
 
-*   **Organización Automática:** Clasifica archivos por categoría y género sin intervención humana.
+*   **Vigilancia Activa (Watchdog)**: Detecta archivos nuevos en tu carpeta `Incoming` al instante.
 
-*   **Limpieza de "Texto Sucio":** Elimina automáticamente etiquetas de la *scene* (HDRip, x264, grupos de ripeo) para dejar títulos limpios.
+*   **Doble Capa de Verificación**: Identifica archivos por su nombre (IA) y por su contenido (Hash ED2K / Fingerprint). 
 
-*   **Seguridad y Anti-Fake:** 
-    *   Detecta archivos falsos comparando la duración real del video con los metadatos oficiales.
-    *   Realiza triaje de seguridad en ejecutables (`.exe`) verificando firmas digitales.
+*   **Antimalware Semántico**: Inspección profunda de archivos comprimidos (`.zip`, `.rar`, `.7z`) sin extracción, usando VirusTotal, para detectar ejecutables ocultos o inconsistencias.
 
-*   **Privacidad Total:** Opción de procesar todo mediante modelos de lenguaje locales (vía LM Studio/Mistral) para no enviar datos a la nube.
-
-*   **Bajo Consumo de Recursos:** Optimizado para hardwares de gama baja, utilizando colas de prioridad (_Priority Queues_) para no saturar el disco duro.
-
----
-
-## Cómo funciona (El Pipeline)
-
-1.  **Monitorización:** `Watchdog` detecta la llegada de un archivo a `Incoming`.
-
-2.  **Verificación de Identidad:** Se calcula el Hash ED2K y se busca en la base de datos local.
-
-3.  **Procesamiento de IA:** Un LLM analiza el nombre sucio y extrae el título y el tipo de contenido.
-
-4.  **Enriquecimiento:** Se consulta **TMDB** (cine) u **OpenLibrary** (libros) para obtener año, género y carátulas.
-
-5.  **Operación Atómica:** El archivo se mueve y renombra a su destino final siguiendo un patrón estándar (ej. `/Peliculas/Ciencia Ficcion/Matrix (1999).mkv`).
+*   **Desempate Inteligente (Tie-Breaking)**: Usa la duración real de los videos para distinguir entre películas homónimas (ej: Solaris 1972 vs 2002).
+*   **Triaje Automático**: 
+    -   `MALICIOUS`: Borrado automático destructivo.
+    -   `SUSPICIOUS`: Cuarentena para revisión manual.
+    -   `SAFE`: Organización temática automatizada.
+*   **Privacidad**: Compatible con modelos locales (LM Studio) para procesar nombres sin subirlos a la nube.
 
 ---
 
-## Stack tecnológico usado
+## 🛠️ Requisitos del Sistema
 
-*   **Lenguaje:** Python 3.10+
-*   **IA:** Gemini API (Cloud) / Mistral-7B (Local vía LM Studio)
-*   **APIs:** TMDB, OpenLibrary
-*   **Librerías clave:** `watchdog` (Eventos), `pefile` (Seguridad), `psutil` (Optimización), `streamlit` (Dashboard).
+### 1. Dependencias de Python
+Instala las librerías necesarias con:
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Herramientas de Sistema (OBLIGATORIO)
+Para el análisis de archivos y desempate de películas, SmartMule requiere:
+
+*   **FFmpeg (ffprobe)**: Necesario para extraer la duración y resolución de los videos.
+    -   **Windows**: Descarga de [ffmpeg.org](https://ffmpeg.org/download.html), extrae el `.zip` y añade la carpeta `bin` al `PATH` de tu sistema.
+    -   **Linux**: `sudo apt install ffmpeg`
+
+*   **7-Zip / Patool**: Necesario para inspeccionar archivos comprimidos.
+    -   **Windows**: Instala [7-Zip](https://www.7-zip.org/) y asegúrate de que esté en el `PATH`.
+    -   **Linux**: `sudo apt install p7zip-full`
 
 ---
 
-> Traducción futura a inglés para el repositorio de GitHub
+## 🏗️ Cómo funciona (El Pipeline de Datos)
+
+1.  **Monitorización**: El `Watcher` detecta el archivo e inicia una espera de desbloqueo (_I/O unlock_).
+
+2.  **Caché Inteligente**: Se calcula una "Fingerprint" rápida. Si el archivo ya existe y el `mtime` (_modification time_) no ha cambiado, se reutilizan los metadatos para ahorrar APIs.
+
+3.  **Análisis Semántico**: Si es un contenedor, el `ArchiveInspector` busca amenazas antes de que el usuario lo abra.
+
+4.  **Capa IA (LLM)**: Limpia el nombre "sucio" de la _Scene_ y detecta el tipo de medio (Cine, Música, Libros, Software, etc.).
+
+5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary** usando el año y la duración para un emparejamiento perfecto.
+
+6.  **Organización**: El `LibraryOrganizer` mueve el archivo a su destino final (ej: `/Library/Movies_and_Series/Matrix (1999).mkv`).
+
+---
+
+## 🧪 Testing
+
+SmartMule cuenta con una suite de pruebas para garantizar la estabilidad:
+```bash
+pytest -v --tb=short
+```
+
+---
