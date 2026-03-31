@@ -25,6 +25,7 @@ from smartmule.hasher import calculate_ed2k, format_ed2k_link, calculate_fingerp
 from smartmule.database import HashDatabase
 from smartmule.config import DB_PATH
 from smartmule.metadata_engine import MetadataEngine
+from smartmule.organizer import LibraryOrganizer
 
 # Creo un logger específico para este módulo.
 logger = logging.getLogger("SmartMule.queue_manager")
@@ -332,41 +333,59 @@ class QueueManager:
         # Consulto a la BBDD si ya conocemos este contenido exactamente (por su huella).
         existing = self._db.get_by_fingerprint(fingerprint, task.file_size)
 
+        # Guardamos si estamos forzando el re-análisis por mtime
+        force_rehash = False
 
-        if existing: # Si existe, obtengo los datos de la BBDD y me ahorro el cálculo innecesario del hash ED2K
+        if existing: # Si existe contenido conocido por Fingerprint
+            
+            # Verificamos si realmente se completó el enriquecimiento y la organización
+            actual_mtime = int(file_path.stat().st_mtime)
+            cached_mtime = existing.get('file_mtime', 0)
 
-            ed2k_hash = existing['ed2k_hash']
-            ed2k_link = existing['ed2k_link']
-            processed_at_raw = existing['processed_at'] # Fecha en formato ISO 8601 (YYYY-MM-DD HH:MM:SS.ffffff)
+            if existing.get('is_organized', 0) == 1 and existing.get('security_verdict') != '':
+                
+                # Si el mtime NO coincide, el archivo fue manipulado desde la última vez.
+                # Lo marcamos para recalcular el hash pero intentando ahorrar APIs si el hash es el mismo.
+                if actual_mtime != cached_mtime:
+                    logger.info(f"⚠️  Detectado cambio en la fecha de modificación de {file_name}. Verificando integridad del hash...")
+                    force_rehash = True # Vamos a la Fase 2, pero con cautela.
+                
+                else:
+                    ed2k_hash = existing['ed2k_hash']
+                    ed2k_link = existing['ed2k_link']
+                    processed_at_raw = existing['processed_at']
 
-            # Formateo la fecha
-            try:
-                dt = datetime.fromisoformat(processed_at_raw)
-                processed_at = dt.strftime("%d/%m/%Y %H:%M:%S") # Formato legible (DD/MM/AAAA HH:MM:SS)
-            except Exception:
-                processed_at = processed_at_raw 
+                    # Formateo la fecha
+                    try:
+                        dt = datetime.fromisoformat(processed_at_raw)
+                        processed_at = dt.strftime("%d/%m/%Y %H:%M:%S")
+                    except Exception:
+                        processed_at = processed_at_raw 
 
+                    logger.info(f"✅  Contenido reconocido (Fingerprint + MTime) y completamente organizado.")
+                    logger.info(f"🔹  Hash ED2K: {ed2k_hash}")
+                    logger.info(f"🔹  Link: {ed2k_link}")
+                    logger.info(f"ℹ️  Archivo en su ruta final: {existing.get('final_path')}")
+                    return 
 
-            logger.info(f"✅  Contenido reconocido mediante Fingerprint.")
-            logger.info(f"🔹  Hash ED2K: {ed2k_hash}")
-            logger.info(f"🔹  Link: {ed2k_link}")
-            logger.info(f"ℹ️  Archivo ya procesado el {processed_at}.")
-
-            return 
+            else:
+                logger.info(f"ℹ️  El archivo Fingerprint {fingerprint[:8]} ya existe, pero faltan metadatos o no fue organizado. Forzando re-análisis completo...")
+                # Continuamos a la Fase 2 sin optimización (re-proceso total).
 
 
         # === FASE 2: Hashing ED2K ===
 
-        # Si no está en caché, calculo el hash ED2K completo:
+        # Calculamos el hash ED2K completo (necesario siempre que no estemos en la ruta de retorno rápido del principio).
 
         logger.info(f"🔹  Calculando hash ED2K de: {file_name}...")
-        hash_start = time.time() # Tomo el tiempo actual antes de calcular el hash.
+        hash_start = time.time() 
 
-        ed2k_hash = calculate_ed2k(file_path)  # Bloqueante. Puede tardar minutos para archivos muy grandes.
+        # Calculo el hash ED2K completo.
+        ed2k_hash = calculate_ed2k(file_path)
 
-        # Formateo el tiempo transcurrido de forma legible (ej: "4min 12s" o "8s")
+        # Lógica de tiempo transcurrido
         elapsed = time.time() - hash_start
-        mins, secs = divmod(int(elapsed), 60) # Devuelve una tupla (minutos, segundos)
+        mins, secs = divmod(int(elapsed), 60)
         elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
 
         logger.info(f"\n✅  Hash ED2K calculado en {elapsed_str}: {ed2k_hash}")
@@ -375,22 +394,47 @@ class QueueManager:
         ed2k_link = format_ed2k_link(file_path, task.file_size, ed2k_hash)
         logger.info(f"🔹  Link: {ed2k_link}")
 
-        # === FASE 3: Persistencia en Caché ===
+        # --- OPTIMIZACIÓN POR MTIME (Ahorro de APIs) ---
 
-        # Guardo el hash junto con la huella digital para que la próxima vez sea instantáneo, sin importar si el archivo cambia de nombre.
+        # Si se detectó cambio de mtime (timestamp de modificación del archivo), pero su hash ED2K es el mismo y existe un registro previo:
+        if force_rehash and existing and ed2k_hash == existing['ed2k_hash']:
+
+            logger.info("✅  Integridad confirmada: El contenido no ha variado a pesar de la modificación del archivo.")
+            logger.info("ℹ️  Reutilizando metadatos existentes...")
+            
+            # Actualizamos la BBDD solo con el nuevo mtime y timestamp de procesado del archivo
+            self._db.save(file_path, task.file_size, fingerprint, ed2k_hash, ed2k_link)
+
+            logger.info(f"ℹ️  Fecha de registro actualizada para {file_name}. Proceso optimizado finalizado.")
+
+            return 
+
+        # === FASE 3: Persistencia Inicial en Caché ===
+
         self._db.save(file_path, task.file_size, fingerprint, ed2k_hash, ed2k_link)
-        logger.info(f"✅  Hash guardado exitosamente en BBDD.")
+        logger.info(f"✅  Hash guardado inicialmente en BBDD.")
 
         # === FASE 4: IA + APIs ===
-        logger.info(f"🔹  Iniciando orquestación de metadatos (Regex -> IA -> API)...")
 
-        # Instanciamos el motor "on demand" (MetadataEngine) para usarlo en el Worker. 
-        # Podría reutilizarse si se pasa como instancia al Manager.
-        engine = MetadataEngine()
+        logger.info(f"🔹  Iniciando orquestación de metadatos (Regex -> IA -> API -> Antimalware)...")
 
-        metadata_dict = engine.identify_file(file_name, str(file_path)) # Aquí se ejecuta todo el pipeline de IA + APIs + Triaje de seguridad
+        engine = MetadataEngine() # Instancio el motor de metadatos
+        metadata_dict = engine.identify_file(file_name, str(file_path))  # Pipeline completo de metadatos
         
-        logger.info(f"✅  Procesamiento finalizado para: {file_name}")
+        # === FASE 5: Organización en Disco (Reto 5) ===
+        
+        organizer = LibraryOrganizer() # Instancio el organizador
+        final_path = organizer.organize(str(file_path), metadata_dict) # Organizo el archivo
+        
+        # === FASE 6: Persistencia Final (Metadatos) ===
+
+        self._db.update_metadata(fingerprint, task.file_size, metadata_dict, final_path)
+        
+        if final_path == "<DELETED_MALICIOUS>":
+            logger.info(f"✅  Archivo purgado de la cola y del sistema.")
+        else:
+            logger.info(f"✅  Procesamiento y organización superados para: {file_name}")
+
 
     # Método para detener el Worker Thread
     def stop(self) -> None:

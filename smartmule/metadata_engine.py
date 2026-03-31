@@ -30,16 +30,21 @@ class MetadataEngine:
     # Método para identificar el archivo
     def identify_file(self, filename: str, filepath: str = None) -> dict:
 
-        logger.info(f"🔍 [Engine] Identificando archivo [{filename}]...")
+        logger.info(f"🔍  Identificando archivo [{filename}]...")
         
+
         # ================= CAPA 1: Regex Simple =================
+
+
         data = parse_filename(filename)
         
+
         # ================= CAPA 2: IA =================
 
-        if data.get("confidence") == "low": # Si la confianza es baja, escalamos a IA
 
-            logger.info("⚠️ [Engine] Nombre de archivo confuso. Escalando a IA (Capa 2)...")
+        if data.get("confidence") == "low": # Si la confianza en el resultado de Regex es baja, escalamos a IA
+
+            logger.info("⚠️  Nombre de archivo confuso. Consultando a la IA (Capa 2)...")
 
             ai_data = parse_with_llm(filename) # Llamamos a la IA
             
@@ -56,14 +61,55 @@ class MetadataEngine:
                 data = ai_data # Combinamos los datos de la IA con los de Regex
 
             else:
-                logger.warning("❌ [Engine] IA falló. Volviendo al resultado regular de Capa 1.")
+                logger.warning("❌  Análisis por IA falló. Volviendo al resultado regular de Capa 1.")
                 
         # Extracción de datos clave para la siguiente fase
         titulo_limpio = data.get("title", "")
         media_type = data.get("media_type", "unknown")
         year = data.get("year")
         
-        logger.info(f"✨ [Engine] Nombre limpio: '{titulo_limpio}' ({media_type})")
+        logger.info(f"✨  Nombre limpio: '{titulo_limpio}' ({media_type})")
+
+
+        # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
+        
+
+        if media_type == "compressed" and filepath: # Si el archivo es un comprimido y tenemos la ruta
+
+            from smartmule.parsers.archive_inspector import inspect_archive
+                
+            logger.info(f"🗜️  Archivo comprimido detectado. Iniciando análisis...")
+            inspection = inspect_archive(filepath)
+            
+            # Si el interior revela un FAKE/MALICIOUS o está encriptado (protegido con contraseña), anulamos todo el proceso.
+            if inspection["status"] in ["MALICIOUS", "SUSPICIOUS"]:
+                logger.warning(f"🛑  Triaje de seguridad abortado por Inconsistencia Semántica o Cifrado.")
+                
+                # Simulamos la respuesta final para que conste en BBDD y en el Organizer
+                veredicto = "\033[91mMALICIOUS !!!\033[0m" if inspection["status"] == "MALICIOUS" else "\033[93mSUSPICIOUS !\033[0m"
+                
+                data["api_data"] = {
+                    "source": "Semantic Inspector",
+                    "official_title": filename,
+                    "veredicto": veredicto,
+                    "malicious_count": 99 if inspection["status"] == "MALICIOUS" else 1, 
+                    "suspicious_count": 0,
+                    "url": "N/A (Semantic Malware)" # No hay URL porque se trata de un archivo comprimido
+                }
+
+                # Mantenemos status sin procesar APIs oficiales
+                return data
+                
+            # Si el archivo comprimido es SAFE, y contiene un archivo multimedia claro, reclasificamos para que TMDB/OpenLibrary hagan su trabajo
+            # Por ejemplo, si el archivo es "Mi_Pelicula.rar" y dentro tiene "Mi_Pelicula.mp4", lo reclasificamos como "video"
+
+            if inspection["status"] == "SAFE" and inspection.get("detected_media"):
+
+                logger.info(f"🔄 [Engine] Reclasificando media_type por contenido interno: 'compressed' -> '{inspection['detected_media']}'")
+                
+                media_type = inspection["detected_media"] # Obtenemos el Media Type
+                data["media_type"] = media_type # Actualizamos el Media Type
+ 
 
         # ================= CAPA 3: APIs Oficiales =================
 

@@ -166,15 +166,20 @@ class ColoredFormatter(logging.Formatter):
         record.name = original_name
         record.msg = msg_str 
         
-        # Primero de todo, lógica de colores (emojis manuales) si los hay...
-        if getattr(record, 'msg', '').startswith("\n") and getattr(record, 'msg', '')[1:].startswith("❌"):
-             log_message = f"{self.RED}{log_message}{self.RESET}"
-        elif msg_str.startswith("❌"):
-            log_message = f"{self.RED}{log_message}{self.RESET}"
-        elif msg_str.startswith("⚠️"):
-            log_message = f"{self.YELLOW}{log_message}{self.RESET}"
-        elif msg_str.startswith("✅"):
-            log_message = f"{self.GREEN}{log_message}{self.RESET}"
+        # Lógica de colores por nivel (Prioridad: CRITICAL siempre Violeta)
+        if record.levelno == logging.CRITICAL:
+            log_message = f"{self.MAGENTA}{log_message}{self.RESET}"
+        
+        # Lógica de colores por emojis si no es crítico (ya que ya tiene color violeta)
+        else:
+            if getattr(record, 'msg', '').startswith("\n") and getattr(record, 'msg', '')[1:].startswith("❌"):
+                log_message = f"{self.RED}{log_message}{self.RESET}"
+            elif msg_str.startswith("❌"):
+                log_message = f"{self.RED}{log_message}{self.RESET}"
+            elif msg_str.startswith("⚠️"):
+                log_message = f"{self.YELLOW}{log_message}{self.RESET}"
+            elif msg_str.startswith("✅"):
+                log_message = f"{self.GREEN}{log_message}{self.RESET}"
             
         # Si el usuario mandó un \n al principio del log (ej: Procesando), lo metemos antes de toda la línea (antes de la hora).
         if has_manual_newline:

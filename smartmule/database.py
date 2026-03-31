@@ -19,7 +19,7 @@ from typing import Optional # Para indicar que una función puede devolver None
  
 logger = logging.getLogger("SmartMule.database")
 
-
+# Clase principal para la gestión de la base de datos
 class HashDatabase:
 
     """
@@ -45,19 +45,41 @@ class HashDatabase:
             fingerprint  TEXT NOT NULL DEFAULT '', -- Huella digital SHA256 del contenido
             ed2k_hash    TEXT NOT NULL, -- Hash ED2K en formato hexadecimal
             ed2k_link    TEXT NOT NULL, -- Enlace ed2k:// generado
-            processed_at TEXT NOT NULL -- Fecha y hora en que fue procesado
+            processed_at TEXT NOT NULL, -- Fecha y hora en que fue procesado
+            file_mtime   INTEGER DEFAULT 0, -- Fecha de modificación del sistema de archivos
+            official_title TEXT DEFAULT '',
+            release_date TEXT DEFAULT '',
+            author TEXT DEFAULT '',
+            score REAL DEFAULT 0,
+            media_type TEXT DEFAULT 'unknown',
+            security_verdict TEXT DEFAULT '',
+            vt_url TEXT DEFAULT '',
+            final_path TEXT DEFAULT '',
+            is_organized INTEGER DEFAULT 0
         );
     """
 
-    # Migración: Me aseguro de que la columna fingerprint exista
-    _MIGRATE_FINGERPRINT_SQL = "ALTER TABLE hashes ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';"
-
+    # Migraciones para añadir columnas a bases de datos antiguas de forma segura
+    _MIGRATIONS = [
+        "ALTER TABLE hashes ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN file_mtime INTEGER DEFAULT 0;",
+        "ALTER TABLE hashes ADD COLUMN official_title TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN release_date TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN author TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN score REAL DEFAULT 0;",
+        "ALTER TABLE hashes ADD COLUMN media_type TEXT DEFAULT 'unknown';",
+        "ALTER TABLE hashes ADD COLUMN security_verdict TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN vt_url TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN final_path TEXT DEFAULT '';",
+        "ALTER TABLE hashes ADD COLUMN is_organized INTEGER DEFAULT 0;"
+    ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
     # NO es UNIQUE para evitar riesgo de colisiones de hashes SHA256 (aunque sean muy improbables).
     _CREATE_INDEX_SQL = """
         CREATE INDEX IF NOT EXISTS idx_fingerprint_size ON hashes (fingerprint, file_size);
     """
+
 
     # Constructor
     def __init__(self, db_path: Path):
@@ -89,7 +111,7 @@ class HashDatabase:
 
         # 2º. MIGRACIONES: Aseguro que las columnas necesarias existan antes de indexar
 
-        for sql in [self._MIGRATE_FINGERPRINT_SQL]: # Lista de sentencias SQL de migración
+        for sql in self._MIGRATIONS: # Lista de sentencias SQL de migración
             try:
                 self._conn.execute(sql) # Ejecuto la sentencia SQL
             except sqlite3.OperationalError: 
@@ -105,8 +127,8 @@ class HashDatabase:
 
         logger.debug(f"🔹  Base de datos SQLite abierta en: {db_path}")
 
-    # Funciones de consulta
 
+    # Función de búsqueda por hash ED2K
     def get_by_hash(self, ed2k_hash: str) -> Optional[dict]:
 
         """
@@ -131,6 +153,7 @@ class HashDatabase:
         return dict(row) if row else None
 
 
+    # Función de búsqueda por huella digital
     def get_by_fingerprint(self, fingerprint: str, file_size: int) -> Optional[dict]:
 
         """
@@ -154,6 +177,7 @@ class HashDatabase:
         row = cursor.fetchone()
 
         return dict(row) if row else None
+
 
     # Función de guardado en la BBDD SQLite
     def save(
@@ -183,15 +207,16 @@ class HashDatabase:
         self._conn.execute(
             """
             INSERT OR REPLACE INTO hashes
-                (file_path, file_name, file_size, fingerprint, ed2k_hash, ed2k_link, processed_at)
+                (file_path, file_name, file_size, fingerprint, file_mtime, ed2k_hash, ed2k_link, processed_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?)
+                (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
                 file_path.name,
                 file_size,
                 fingerprint,
+                int(file_path.stat().st_mtime),
                 ed2k_hash,
                 ed2k_link,
                 processed_at,
@@ -201,6 +226,58 @@ class HashDatabase:
         self._conn.commit()
 
         logger.debug(f"🔹  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
+
+
+    # Función de actualización de metadatos
+    def update_metadata(self, fingerprint: str, file_size: int, metadata: dict, final_path: str) -> None:
+
+        """
+        Actualiza el registro en la caché con los metadatos enriquecidos y la información del Organizador.
+        """
+
+        # Extraigo los valores (values) del diccionario que devuelve el MetadataEngine
+        api_data = metadata.get("api_data") or {}
+
+        # Extraigo los metadatos de las APIs:
+
+        # Título oficial
+        official_title = api_data.get("official_title", "")
+        # Fecha de lanzamiento/estreno
+        release_date = api_data.get("date", "")
+        # Autor
+        author = api_data.get("author", "")
+        # Puntuación dada por los usuarios
+        score = api_data.get("score", 0.0)
+        # Tipo de archivo (película, serie, etc.)
+        media_type = metadata.get("media_type", "unknown")
+        # Veredicto de seguridad (Safe, Suspicious o Malicious)
+        security_verdict = api_data.get("veredicto", "")
+        # URL del informe de VirusTotal
+        vt_url = api_data.get("url", "")
+        # 1 si está organizado (tiene ruta final), 0 si no (no se ha movido o no se ha encontrado)
+        is_organized = 1 if final_path else 0
+
+        # Cadena vacía ("") es el valor por defecto si no se encuentra el metadato
+
+        # Actualizo el registro en la caché con los metadatos enriquecidos y la información del Organizador
+        self._conn.execute(
+            """
+            UPDATE hashes
+            SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
+                security_verdict=?, vt_url=?, final_path=?, is_organized=?
+            WHERE fingerprint=? AND file_size=?
+            """,
+            (official_title, release_date, author, score, media_type,
+             security_verdict, vt_url, final_path, is_organized, fingerprint, file_size)
+        )
+
+        # Uso el fingerprint (la huella SHA256) y el file_size en el WHERE. 
+        # Esto garantiza que, aunque tenga dos archivos que se llamen igual, solo actualizaré el registro exacto cuya huella digital coincida.
+
+        self._conn.commit() # Confirmo los cambios en la BBDD
+
+        logger.debug(f"🔹  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
+
 
     # Función de cierre de la BBDD SQLite
     def close(self) -> None:
