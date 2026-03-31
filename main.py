@@ -8,16 +8,21 @@ Aquí orquesto todos los componentes de la implementación inicial:
 4. Creo el QueueManager (PriorityQueue + Worker Thread)
 5. Creo el SmartMuleWatcher (FileSystemObserver + debouncer)
 6. Hago un scan inicial de archivos existentes en Incoming
-7. Mantengo el programa corriendo hasta que el usuario pulse Ctrl+C
+7. Mantengo el programa corriendo en segundo plano o consola.
 
-El programa es un script que se ejecuta en primer plano. 
-No es un servicio Windows, se detiene con Ctrl+C (KeyboardInterrupt).
+Implementa un Singleton mediante PID y un comando `stop`.
 """
 
-import sys
-import logging
+import sys # Manejo de argumentos
+import os # Manejo de archivos y procesos
+import signal # Manejo de señales de terminación
+import psutil # Manejo de procesos
+import logging # Manejo de logs
+import argparse # Manejo de argumentos
+from typing import Optional # Tipado
 
 from smartmule.config import (
+    BASE_DIR, # Directorio base
     INCOMING_PATH,
     LIBRARY_PATH,
     DEBOUNCE_SECONDS,
@@ -31,93 +36,140 @@ from smartmule.watcher import SmartMuleWatcher
 # Logger para este módulo.
 logger = logging.getLogger("SmartMule.main")
 
+PID_FILE = BASE_DIR / "smartmule.pid" # Archivo PID para el daemon
+
+# Función para obtener el PID del daemon
+def get_active_pid() -> Optional[int]:
+
+    """Lee el PID del daemon si está activo."""
+
+    if not PID_FILE.exists():
+        return None
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        if psutil.pid_exists(pid):
+            return pid
+        else:
+            PID_FILE.unlink() # Proceso huérfano
+            return None
+    except Exception:
+        return None
+
+# Función para escribir el PID actual en el fichero
+def write_pid():
+    """Guarda el PID actual en el fichero."""
+    PID_FILE.write_text(str(os.getpid()))
+
+# Función para borrar el archivo PID si existe
+def remove_pid():
+    """Borra el archivo PID si existe."""
+    if PID_FILE.exists():
+        try:
+            PID_FILE.unlink()
+        except:
+            pass
+
+# Función para detener el daemon
+def stop_daemon():
+    """Detiene el servicio en segundo plano leyendo el PID."""
+    pid = get_active_pid()
+    if not pid:
+        print("ℹ️  SmartMule no está corriendo en segundo plano.")
+        return
+        
+    print(f"🛑 Deteniendo SmartMule (PID: {pid})...")
+    try:
+        p = psutil.Process(pid)
+        p.terminate() # Equivalente a SIGTERM
+        p.wait(timeout=5)
+        print("✅  SmartMule se ha detenido limpiamente.")
+    except psutil.NoSuchProcess:
+        print("ℹ️  El proceso ya no existe.")
+    except psutil.TimeoutExpired:
+        print("⚠️  El proceso está tardando en cerrar. Forzando cierre (kill)...")
+        p.kill()
+    except Exception as e:
+        print(f"❌  Error al detener: {e}")
+    finally:
+        remove_pid()
 
 def setup_io_priority() -> None:
-
-    """
-    Establezco la prioridad de I/O del proceso a "Very Low" en Windows.
-
-    Esto le dice al planificador de disco de Windows que SmartMule es un proceso de fondo que puede esperar. 
-    Así SmartMule no compite por el ancho de banda del disco duro.
-
-    Uso psutil (Process and System Utilities) porque la API de Windows para establecer la prioridad de I/O no está expuesta directamente en el módulo os de Python.
-    """
-
+    """Establezco la prioridad de I/O del proceso a 'Very Low' en Windows."""
     try:
-        import psutil
-        import os
-
-        process = psutil.Process(os.getpid()) # Obtengo el PID del proceso actual
-        process.ionice(psutil.IOPRIO_VERYLOW) # Establezco la prioridad de I/O a VERY_LOW
-        logger.info("✅ Prioridad de I/O [VERY_LOW] establecida exitosamente.")
-
-    except ImportError:
-        # Si psutil no está instalado, sigo adelante sin prioridad baja. No es un error fatal, solo una optimización que me pierdo.
-        logger.warning(
-            "❌ psutil no está instalado. La prioridad de I/O no se ha podido ajustar."
-        )
+        process = psutil.Process(os.getpid())
+        process.ionice(psutil.IOPRIO_VERYLOW)
+        logger.info("✅  Prioridad de I/O [VERY_LOW] establecida exitosamente.")
     except Exception as e:
-        # En sistemas Linux, psutil.IOPRIO_VERYLOW podría no existir.
-        logger.warning(f"⚠ No pude establecer la prioridad de I/O: {e}")
+        logger.warning(f"⚠️  No pude establecer la prioridad de I/O: {e}")
 
 
 def main() -> None:
-
-    """
-    Función principal de SmartMule. Arranco todo, hago el scan inicial y mantengo el programa corriendo hasta que el usuario pulse Ctrl+C.
-    """
-
-    # === 0. Argumentos de Línea de Comandos ===
-    import argparse
+    """Función principal de SmartMule."""
     parser = argparse.ArgumentParser(description="SmartMule - El Bibliotecario Inteligente P2P")
-    parser.add_argument("--debug", action="store_true", help="Habilita los logs de nivel DEBUG (más detallados)")
+    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop"], help="Acción a realizar: start (por defecto) o stop")
+    parser.add_argument("--debug", action="store_true", help="Habilita los logs de nivel DEBUG")
     args = parser.parse_args()
 
-    # === 1. Logging ===
+    if args.action == "stop":
+        stop_daemon()
+        sys.exit(0)
 
-    # Configuro el logging lo antes posible para que cualquier error posterior se registre correctamente.
-    # Si se pasa --debug por comando, forzamos el nivel DEBUG.
+    # === Singleton ===
+    active_pid = get_active_pid()
+    if active_pid:
+        print(f"⚠️  SmartMule ya está corriendo en 2º plano (PID: {active_pid}).")
+        print("Ejecuta 'python main.py stop' para detenerlo antes de iniciar otro.")
+        sys.exit(1)
+
+    write_pid()
+
+    # === 1. Logging ===
     log_level = "DEBUG" if args.debug else None
     setup_logging(level=log_level)
 
-    # Muestro el banner de inicio en color azul (color de main).
-    # Lo imprimo directamente sin el logger para que no se vea el prefijo de tiempo ni [SmartMule.main],
-    # haciendo que luzca como una cabecera limpia y centrada.
     banner = r"""+===================================+
 |  SmartMule 🫏                    |
-|  El Bibliotecario Inteligente P2P |
+|  El Demonio Inteligente P2P       |
 +===================================+"""
     print(f"\033[94m{banner}\033[0m\n")
  
     # === 2. Validación de rutas ===
- 
-    # Verifico que la carpeta Incoming exista y creo Library si no existe.
     if not validate_paths():
         logger.error("❌  Error en la configuración de rutas. Abortando.")
+        remove_pid()
         sys.exit(1)
  
-    # Muestro la configuración actual para que el usuario sepa qué estoy haciendo.
     logger.info(f"🔹  Carpeta Incoming:   {INCOMING_PATH}")
     logger.info(f"🔹  Carpeta Library:    {LIBRARY_PATH}")
     logger.info(f"🔹  Debounce:           {DEBOUNCE_SECONDS}s")
     logger.info(f"🔹  Timeout bloqueo:    {FILE_LOCK_TIMEOUT}s")
 
     # === 3. Prioridad de I/O ===
-
-    # Bajo la prioridad de disco para no molestar al usuario.
     setup_io_priority()
 
     # === 4. QueueManager ===
-
-    # Creo la PriorityQueue. 
-    # El worker NO arranca inmediatamente para evitar que sus logs de procesamiento 
-    # se mezclen con los logs de encolado del escaner inicial.
     queue_manager = QueueManager(auto_start=False)
 
     # === 5. Watcher ===
+    watcher = SmartMuleWatcher(queue_manager)
 
-    # Creo el observador del sistema de archivos y lo apunto a Incoming.
-    watcher = SmartMuleWatcher(queue_manager) # le paso la Queue como argumento
+    # === Manejo de Señales de Terminación ===
+    def handle_shutdown(signum, frame):
+        logger.warning(f"\n⚠️  Señal de apagado ({signum}) recibida. Apagando motor...")
+        watcher.stop()
+        queue_manager.stop()
+        remove_pid()
+        logger.info("ℹ️  SmartMule detenido. ¡HASTA LA PRÓXIMA! 🫏")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_shutdown) # Ctrl+C
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, handle_shutdown)
+    else:
+        try:
+            signal.signal(signal.SIGBREAK, handle_shutdown)
+        except AttributeError:
+            pass
 
     # === 6. Scan inicial ===
 
@@ -142,39 +194,18 @@ def main() -> None:
     watcher.start()
 
     print("\n")
-    logger.info("ℹ️  SmartMule está corriendo. Pulsa Ctrl+C para detener.")
+    logger.info(f"ℹ️  SmartMule está corriendo en 2º plano (PID: {os.getpid()}). 'python main.py stop' para detener.")
 
     # === 9. Bucle principal ===
-
-    # Mantengo el programa vivo esperando la señal de interrupción.
-    # El trabajo real lo hacen los hilos del Observer y del Worker Thread.
     try:
-
-        # Uso un bucle con el join() del Observer en lugar de time.sleep()
-        # De esta forma puedo detectar si el Observer se ha caído por algún error.
         while watcher._observer.is_alive():
             watcher._observer.join(timeout=1.0) 
-        # join() es un método que bloquea la ejecución hasta que el hilo termine. En este caso, lo uso con timeout para que no bloquee indefinidamente.
+    except KeyboardInterrupt:
+        pass
+    finally:
+        watcher.stop()
+        queue_manager.stop()
+        remove_pid()
 
-    except KeyboardInterrupt: # Capturo la interrupción del teclado (Ctrl+C)
-        
-        #Hago un shutdown limpio.
-        logger.info("")
-        logger.warning("⚠️  Interrupción recibida (Ctrl+C). Deteniendo SmartMule...")
-
-    # === 9. Shutdown ===
-
-    # Detengo todo en orden: 
-
-    # 1. Primero el Watcher (para que no meta más archivos en la cola)
-    watcher.stop()
-
-    # 2. Luego el QueueManager (para que termine lo que esté procesando)
-    queue_manager.stop()
-
-    logger.info("ℹ️  SmartMule detenido. ¡HASTA LA PRÓXIMA! 🫏")
-
-
-# Función inicializadora
 if __name__ == "__main__":
     main()

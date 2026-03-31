@@ -4,6 +4,8 @@
 
 **SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
 
+![SmartMule](/images/SmartMule_Logo_Oficial.png)
+
 ---
 
 ## 🚀 Características Principales
@@ -57,6 +59,18 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary** usando el año y la duración para un emparejamiento perfecto.
 
 6.  **Organización**: El `LibraryOrganizer` mueve el archivo a su destino final (ej: `/Library/Movies_and_Series/Matrix (1999).mkv`).
+
+---
+
+## 🤖 Modo Daemon (Ejecución en Segundo Plano)
+
+SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando permanentemente de forma completamente invisible.
+
+*   **Arrancar (Modo Invisible)**: Haz doble clic en el archivo `smartmule_launcher.vbs`. Esto levantará el proceso en segundo plano. Recomiendo crear un acceso directo a este archivo y colocarlo en tu carpeta de *Autoinicio de Windows* (`shell:startup`) para que arranque solo al encender el PC.
+
+*   **Detener**: Si necesitas pararlo, abre una terminal cualquiera (CMD o PowerShell) y ejecuta `python main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
+
+*   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log` (en la raíz del proyecto).
 
 ---
 

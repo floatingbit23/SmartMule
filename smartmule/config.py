@@ -17,6 +17,9 @@ load_dotenv(override=False)
 
 # === Rutas del sistema de archivos ===
 
+# Base root directory of the project
+BASE_DIR: Path = Path(__file__).parent.parent # Ruta a la raíz del proyecto
+
 # Ruta a la carpeta Incoming de eMule, donde llegan las descargas completadas
 # Es la carpeta que voy a monitorizar con el Watcher
 INCOMING_PATH: Path = Path(os.getenv("INCOMING_PATH", r"C:\Users\Javi\eMule\Incoming"))
@@ -226,6 +229,17 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
     console_handler.setFormatter(formatter)
     
     root_logger.addHandler(console_handler)
+
+    # === Handler para guardar logs en archivo de texto plano ===
+
+    # El log se llamará 'smartmule.log' y estará en la raíz del proyecto.
+    # Usamos formato estandar sin colores para evitar "basura ANSI" en bloc de notas.
+
+    file_handler = logging.FileHandler(BASE_DIR / "smartmule.log", mode="a", encoding="utf-8")
+    file_formatter = logging.Formatter("%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s", date_format)
+    file_handler.setFormatter(file_formatter)
+    
+    root_logger.addHandler(file_handler) # Añade el handler de archivo al logger raíz
 
     return logging.getLogger("SmartMule")
 

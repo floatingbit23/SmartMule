@@ -26,3 +26,13 @@ venv/
 
 # Bases de Datos
 *.db
+
+# Estado de ejecución (Daemon)
+smartmule.pid
+
+# Temporales del proyecto
+tmp/
+
+# Archivos de OS
+.DS_Store
+Thumbs.db

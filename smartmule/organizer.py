@@ -3,6 +3,7 @@ import shutil # Módulo para operaciones con archivos y directorios
 import logging
 from pathlib import Path
 from smartmule.config import LIBRARY_PATH
+from smartmule.notifications import send_notification
 
 logger = logging.getLogger("SmartMule.organizer")
 
@@ -69,6 +70,8 @@ class LibraryOrganizer:
 
                 # Borro el archivo directamente, sin preguntar al usuario
                 os.remove(source_path)
+                
+                send_notification("Malware Eliminado 💀", f"Se ha detectado malware encubierto en '{filename}' y ha sido borrado permanentemente por seguridad.", is_critical=True)
 
                 logger.critical(f"🗑️ [Organizer] Archivo {filename} eliminado permanentemente del sistema por su seguridad.")
                 
@@ -82,6 +85,7 @@ class LibraryOrganizer:
                 dest_path = self.review_dir / filename # Ruta 01_Review/filename
 
                 shutil.move(str(source_path), str(dest_path)) # Muevo el archivo
+                send_notification("Archivo Sospechoso ⚠️", f"El archivo '{filename}' ha sido puesto en cuarentena para su revisión manual.", is_critical=True)
 
                 return str(dest_path) # Retorno la ruta final
 
@@ -141,6 +145,10 @@ class LibraryOrganizer:
                 emoji = "📁"
            
             logger.info(f"{emoji} [Organizer] Movido a Biblioteca ({folder_name}): {dest_path.name}")
+            
+            # Formatear un título amigable según la carpeta
+            cat_name = folder_name.replace("_and_", " y ").replace("_", " ")
+            send_notification("Descarga Organizada ✅", f"{emoji} {filename} se ha guardado en tu biblioteca de {cat_name}.")
             
             return str(dest_path)
 

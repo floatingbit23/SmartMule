@@ -25,3 +25,7 @@ openai>=1.14.0
 
 # === Análisis Semántico (Comprimidos) ===
 patool>=2.2.0
+
+# === Notificaciones de SO (Daemon) ===
+plyer>=2.1.0
+
