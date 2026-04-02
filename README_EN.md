@@ -105,8 +105,11 @@ To maintain visibility on the network and continue earning credits after organiz
 1.  **Share Library**: Go to eMule > **Options** > **Directories** and mark the `Library` folder as a shared directory (ensure you include its subfolders).
 
 ![shared_folders](/images/shared_folders.png)
+
 2.  **Privacy**: Do not share the SmartMule root folder, only the `Library` folder. SmartMule stores its database in a hidden folder (`.data`) so that eMule does not index it.
+
 3.  **Maintain Credits**: Your credits are associated with your *User Identification* (Hash), not file names. By sharing the `Library` with cleaned and renamed files, eMule will recognize that you have the same content (same ED2K Hash) and you will continue to accumulate upload priority.
+
 4.  **Update**: After starting SmartMule for the first time, go to eMule's **Shared Files** tab and click the **Reload** button so that the new names appear on the network instantly.
 
 ---
