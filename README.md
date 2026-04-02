@@ -1,6 +1,6 @@
 [ 🇪🇸 Castellano ](README.md) | [ 🇺🇸 English ](README_EN.md)
 
-# SmartMule 🧠
+# SmartMule 🫏
 
 ### El Bibliotecario Inteligente para el Ecosistema P2P
 
@@ -14,7 +14,15 @@
 
 ---
 
-## 🚀 Características Principales
+## ¿Es realmente necesario?
+
+Por defecto, eMule deposita todas las descargas finalizadas en una única carpeta `Incoming`. Con el tiempo, este directorio se convierte en un caos de películas, software, música y archivos con nombres crípticos. 
+
+**SmartMule** soluciona este problema identificando, limpiando y moviendo cada archivo a su categoría temática correspondiente de forma automática, manteniendo tu biblioteca organizada sin esfuerzo manual.
+
+---
+
+## Características Principales
 
 *   **Vigilancia Activa (Watchdog)**: Detecta archivos nuevos en tu carpeta `Incoming` al instante.
 
@@ -55,7 +63,7 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 ---
 
-## 🏗️ Cómo funciona (El Pipeline de Datos)
+## Cómo funciona (El Pipeline de Datos)
 
 1.  **Monitorización**: El `Watcher` detecta el archivo e inicia una espera de desbloqueo (_I/O unlock_).
 
@@ -71,7 +79,7 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 ---
 
-## 🤖 Modo Daemon (Ejecución en Segundo Plano)
+## Daemon (Ejecución en Segundo Plano)
 
 SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando permanentemente de forma completamente invisible.
 
@@ -89,7 +97,7 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
 
 ---
 
-## 🔗 Configuración en eMule (IMPORTANTE)
+## Configuración en eMule (IMPORTANTE)
 
 Para no perder visibilidad en la red ni dejar de ganar créditos tras la organización de tus archivos, sigue estos pasos:
 
@@ -106,7 +114,7 @@ Para no perder visibilidad en la red ni dejar de ganar créditos tras la organiz
 
 ---
 
-## 🧪 Testing
+## Testing
 
 SmartMule cuenta con una suite de pruebas para garantizar la estabilidad:
 ```bash

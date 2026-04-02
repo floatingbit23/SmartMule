@@ -1,6 +1,6 @@
 [ 🇺🇸 English ](README_EN.md) | [ 🇪🇸 Castellano ](README.md)
 
-# SmartMule 🧠
+# SmartMule 🫏
 
 ### The Intelligent Librarian for the P2P Ecosystem
 
@@ -14,7 +14,15 @@
 
 ---
 
-## 🚀 Key Features
+## Why?
+
+By default, eMule places all completed downloads into a single `Incoming` folder. Over time, this directory becomes a chaotic mix of movies, software, music, and archives with cryptic "scene" names. 
+
+**SmartMule** solves this by automatically identifying, cleaning, and moving each file into its proper thematic category, keeping your library organized without manual effort.
+
+---
+
+## Key Features
 
 *   **Active Surveillance (Watchdog)**: Instantly detects new files in your `Incoming` folder.
 
@@ -33,7 +41,7 @@
 
 ---
 
-## 🛠️ System Requirements
+## System Requirements
 
 ### 1. Python Dependencies
 
@@ -56,7 +64,7 @@ For file analysis and movie tie-breaking, SmartMule requires:
 
 ---
 
-## 🏗️ How it Works (Data Pipeline)
+## How it Works (Data Pipeline)
 
 1.  **Monitoring**: The `Watcher` detects the file and starts an I/O unlock wait.
 
@@ -72,7 +80,7 @@ For file analysis and movie tie-breaking, SmartMule requires:
 
 ---
 
-## 🤖 Daemon Mode (Background Execution)
+## Daemon (Background Execution)
 
 SmartMule is designed to run once and remain monitoring permanently in a completely invisible manner.
 
@@ -90,7 +98,7 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
 
 ---
 
-## 🔗 eMule Configuration (IMPORTANT)
+## eMule Configuration (IMPORTANT)
 
 To maintain visibility on the network and continue earning credits after organizing your files, follow these steps:
 
@@ -103,7 +111,7 @@ To maintain visibility on the network and continue earning credits after organiz
 
 ---
 
-## 🧪 Testing
+## Testing
 
 SmartMule includes a test suite to ensure stability:
 ```bash
