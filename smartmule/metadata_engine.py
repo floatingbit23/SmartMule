@@ -145,6 +145,10 @@ class MetadataEngine:
                 
                 media_type = inspection["detected_media"] # Obtenemos el Media Type
                 data["media_type"] = media_type # Actualizamos el Media Type
+                
+                # Guardamos el archivo representante interno si existe
+                if inspection.get("representative"):
+                    data["internal_representative"] = Path(inspection["representative"]).name
  
 
         # ================= CAPA 3: APIs Oficiales =================
@@ -320,7 +324,23 @@ class MetadataEngine:
         # Triaje de seguridad para software y archivos comprimidos
         elif media_type == "software" or media_type == "compressed":
 
-            logger.info("💾  Software/Archivo comprimido detectado. Iniciando triaje de seguridad con VirusTotal...")
+            internal_name = data.get("internal_representative") # Nombre del archivo interno, si existe
+            target_info = f"-> [{internal_name}]" if internal_name else "" # Si hay un archivo interno, lo mostramos
+
+            # Disclaimer para archivos de la suite Office con macros o potencial ejecución (incluído el formato PDF)
+            office_macros = {
+                ".xlsm", ".xlsb", ".docm", ".pptm", ".dotm", ".ppsm", ".potm", ".xltm", ".xlam",
+                ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk", ".pdf"
+            }
+
+            extension = data.get("extension", "").lower()
+            
+            # Si la extensión está en el diccionario de macros, mostramos un warning y se analiza como software por VT
+            if extension in office_macros:
+                 logger.warning(f"🛡️  [Seguridad] {filename} contiene Macros de Office!! Lo trataré como ejecutable para triaje preventivo...")
+
+            # Ejemplo: "Software/Archivo comprimido detectado -> [archivo.exe]"
+            logger.info(f"💾  Software/Archivo comprimido detectado {target_info}. Iniciando triaje de seguridad con VirusTotal...")
 
             if technical_target:
 
@@ -358,13 +378,14 @@ class MetadataEngine:
                     elif malicious == 0 and suspicious == 0:
                         veredicto = "\033[92mSAFE\033[0m" # Verde (seguro)
                     elif 1 <= malicious <= 5:
-                        veredicto = "\033[93mSUSPICIOUS !\033[0m" # Amarillo (sospechoso)
+                        veredicto = "\033[93mSUSPICIOUS\033[0m" # Amarillo (sospechoso)
                     elif malicious > 5:
-                        veredicto = "\033[91mMALICIOUS !!!\033[0m" # Rojo (malicioso)
+                        veredicto = "\033[91mMALICIOUS\033[0m" # Rojo (malicioso)
                     else:
-                        veredicto = "\033[93mSUSPICIOUS !\033[0m"
+                        veredicto = "\033[93mSUSPICIOUS\033[0m"
                     
-                    vt_url = f"https://www.virustotal.com/gui/file/{file_hash}"
+                    # Generamos la URL del informe solo si el archivo existe (no es UNKNOWN)
+                    vt_url = f"https://www.virustotal.com/gui/file/{file_hash}" if stats.get("suspicious") != -1 else None
 
                     data["api_data"] = {
                         "source": "VirusTotal",

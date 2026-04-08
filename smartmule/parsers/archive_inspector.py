@@ -8,31 +8,57 @@ from pathlib import Path
 logger = logging.getLogger("SmartMule.inspector") 
 
 # Extensiones peligrosas
-DANGEROUS_EXTS = {".exe", ".vbs", ".js", ".bat", ".cmd", ".ps1", ".scr", ".pif", ".wsf", ".msi"}
+DANGEROUS_EXTS = {
+    ".exe", ".msi", ".bat", ".cmd", ".vbs", ".js", ".ps1", 
+    ".scr", ".pif", ".wsf", ".vbe", ".jse",
+    ".reg", ".lnk", ".com", ".jar", ".hta", ".cpl",
+    ".xlsm", ".xlsb", ".docm", ".pptm",
+    ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk"
+}
 
 # Mapeo de extensiones a Media Types
 MEDIA_MAPPING = {
-    ".mkv": "video", 
-    ".mp4": "video", 
-    ".avi": "video", 
-    ".wmv": "video", 
-    ".mov": "video",
-    ".mp3": "audio", 
-    ".flac": "audio", 
-    ".m4a": "audio", 
-    ".wav": "audio",
-    ".pdf": "book", 
-    ".epub": "book", 
-    ".mobi": "book", 
-    ".cbz": "book", 
-    ".cbr": "book",
-    ".doc": "documents",
-    ".docx": "documents",
-    ".xls": "documents",
-    ".xlsx": "documents",
-    ".txt": "documents",
-    ".exe": "software",
-    ".msi": "software"
+    ".mkv": "video", # Matroska Video
+    ".mp4": "video", # MPEG-4 Part 14
+    ".avi": "video", # Audio Video Interleave
+    ".wmv": "video", # Windows Media Video
+    ".mov": "video", # Apple QuickTime Movie
+    ".mp3": "audio", # MPEG-1 Audio Layer III
+    ".flac": "audio", # Free Lossless Audio Codec
+    ".m4a": "audio", # MPEG-4 Audio
+    ".wav": "audio", # Waveform Audio File Format
+    ".pdf": "book", # Portable Document Format
+    ".epub": "book", # Electronic Publication
+    ".mobi": "book", # Mobipocket
+    ".cbz": "book", # Comic Book Zip
+    ".cbr": "book", # Comic Book Rar
+    ".docx": "documents", # Microsoft Word Document (XML)
+    ".xlsx": "documents", # Microsoft Excel Spreadsheet (XML)
+    ".txt": "documents", # Text Document
+    ".exe": "software", # Executable File
+    ".msi": "software", # Microsoft Windows Installer
+    ".bat": "software", # Batch File
+    ".cmd": "software", # Command File
+    ".reg": "software", # Registry File
+    ".lnk": "software", # Link File
+    ".com": "software", # Command File
+    ".jar": "software", # Java Archive
+    ".hta": "software", # HTML Application
+    ".cpl": "software", # Control Panel Applet
+    ".vbs": "software", # Visual Basic Script
+    ".js": "software", # JavaScript File
+    ".ps1": "software", # PowerShell Script
+    ".scr": "software", # Screen Saver
+    ".xlsm": "software", # Excel Macro-Enabled Spreadsheet
+    ".xlsb": "software", # Excel Binary Workbook
+    ".docm": "software", # Word Macro-Enabled Document
+    ".pptm": "software", # PowerPoint Macro-Enabled Presentation
+    ".doc": "software", # Microsoft Word Document
+    ".xls": "software", # Microsoft Excel Spreadsheet
+    ".ppt": "software", # Microsoft PowerPoint Presentation
+    ".one": "software", # Microsoft OneNote Notebook
+    ".iqy": "software", # Internet Query File
+    ".slk": "software" # SYLK (Symbolic Link) File
 }
 
 # Función para inspeccionar archivos comprimidos
@@ -147,7 +173,7 @@ def inspect_archive(filepath: str, expected_type: str = "unknown") -> dict:
 
         if has_dangerous and expected_type not in ["software", "games"]:
              logger.critical(f"💀 [Inspector] ¡SUPLANTACIÓN! {path.name} (que debería ser {expected_type}) contiene ejecutables.")
-             return {"status": "MALICIOUS", "detected_media": "software"}
+             return {"status": "MALICIOUS", "detected_media": "software", "representative": dangerous_files[0]}
              
         # Si esperamos juegos o software, el ejecutable es NORMAL, pero por seguridad lo dejamos bajo sospecha o revisión si son muchos
 
@@ -172,8 +198,9 @@ def inspect_archive(filepath: str, expected_type: str = "unknown") -> dict:
         else:
             logger.warning(f"⚠️ [Inspector] No se detectó contenido multimedia válido en el contenedor.")
             
-        # Devolvemos el estado (seguro) y el tipo de medio detectado
-        return {"status": "SAFE", "detected_media": detected_media}
+        # Devolvemos el estado (seguro), el tipo de medio detectado y el archivo representante (si hay)
+        representative = dangerous_files[0] if dangerous_files else (file_list[0] if file_list else None)
+        return {"status": "SAFE", "detected_media": detected_media, "representative": representative}
 
     except Exception as e:
         logger.error(f"❌ [Inspector] Fallo crítico inspeccionando {path.name}: {e}")

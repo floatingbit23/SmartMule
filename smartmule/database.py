@@ -242,18 +242,29 @@ class HashDatabase:
 
         # Título oficial
         official_title = api_data.get("official_title", "")
+
         # Fecha de lanzamiento/estreno
         release_date = api_data.get("date", "")
+
         # Autor
         author = api_data.get("author", "")
+
         # Puntuación dada por los usuarios
         score = api_data.get("score", 0.0)
+
         # Tipo de archivo (película, serie, etc.)
         media_type = metadata.get("media_type", "unknown")
+
         # Veredicto de seguridad (Safe, Suspicious o Malicious)
-        security_verdict = api_data.get("veredicto", "")
+        raw_verdict = api_data.get("veredicto", "")
+
+        # Limpiamos códigos de colores ANSI para que la BBDD guarde texto plano y no BLOBs
+        import re
+        security_verdict = re.sub(r'\033\[[0-9;]*m', '', raw_verdict)
+        
         # URL del informe de VirusTotal
         vt_url = api_data.get("url", "")
+        
         # 1 si está organizado (tiene ruta final), 0 si no (no se ha movido o no se ha encontrado)
         is_organized = 1 if final_path else 0
 

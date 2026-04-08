@@ -81,7 +81,8 @@ class VirusTotalClient:
         if not file_hash:
             return None
             
-        logger.info(f"⏳ [VT] Hash SHA-256 calculado: {file_hash[:8]}...  ℹ️  Consultando base mundial...")
+        logger.info(f"⏳  [VT] Hash SHA-256 calculado: {file_hash}")
+        logger.info("ℹ️  Consultando base mundial...")
 
         self._wait_for_rate_limit()
 

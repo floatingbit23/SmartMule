@@ -7,7 +7,7 @@ from pathlib import Path
 EXTENSION_MAPPING = { 
     "video": {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".mpg", ".mpeg", ".m4v", ".ts", ".m2ts", ".ogm", ".divx", ".vob"}, # Vídeos/Películas/Series
     "book": {".pdf", ".epub", ".mobi", ".djvu", ".cbz", ".cbr", ".azw3", ".fb2", ".azw"}, # Libros/Ebooks/Cómics
-    "software": {".exe", ".msi", ".bat", ".dmg", ".pkg", ".apk", ".deb", ".rpm", ".appx"}, # Ejecutables/Instaladores
+    "software": {".exe", ".msi", ".bat", ".cmd", ".com", ".reg", ".lnk", ".jar", ".hta", ".cpl", ".vbs", ".ps1", ".scr", ".xlsm", ".xlsb", ".docm", ".pptm", ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk", ".dmg", ".pkg", ".apk", ".deb", ".rpm", ".appx"}, # Ejecutables e Instaladores
     "compressed": {".rar", ".zip", ".7z", ".iso", ".bin", ".cue", ".tar.gz", ".tgz", ".bz2", ".xz", ".lzma"}, # Archivos comprimidos
     "subtitles": {".srt", ".vtt", ".sub", ".ass", ".ssa", ".lrc"}, # Subtítulos
     "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".opus", ".wma", ".m4b", ".ape", ".mpc", ".wv"}, # Audio/Música
