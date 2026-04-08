@@ -30,7 +30,11 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
 
 *   **Soporte de Directorios (Folder Grouping)**: SmartMule detecta si una descarga es una carpeta (ej: película con subtítulos). Identifica el archivo principal para el hashing y los metadatos, pero mueve y renombra **toda la carpeta** como una única unidad funcional.
 
-*   **Antimalware Semántico**: Inspección profunda de archivos comprimidos (`.zip`, `.rar`, `.7z`) sin extracción, usando VirusTotal. Implementa un sistema de **Triaje Inteligente** que prioriza detecciones de motores TOP (Microsoft, Kaspersky, ESET, etc.) para una tolerancia cero contra amenazas modernas.
+*   **Antimalware Semántico (Triaje de Élite)**: Inspección profunda de archivos sin extracción usando **VirusTotal**. SmartMule no se fía de nadie:
+    -   **Análisis de Macros**: Detecta documentos de Office con macros (`.xlsm`, `.docm`, etc.) y formatos antiguos (`.doc`, `.xls`) tratándolos como ejecutables.
+    -   **Vigilancia de PDF**: Escaneo automático de archivos PDF ante scripts maliciosos.
+    -   **Inspección de Contenedores**: El `ArchiveInspector` analiza archivos `.zip`, `.rar` y `.7z` buscando inconsistencias (ej: un `.exe` disfrazado de película) y mostrando el contenido sospechoso en los logs.
+    -   **Puntuaciones Críticas**: Si un archivo tiene más de 5 detecciones en VT (priorizando motores TOP como Microsoft o Kaspersky), lo mueve a **Review** para evitar riesgos.
 
 *   **Desempate Inteligente (Tie-Breaking)**: Usa la duración real de los videos para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 

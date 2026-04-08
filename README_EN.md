@@ -27,12 +27,16 @@ By default, eMule places all completed downloads into a single `Incoming` folder
 *   **Active Surveillance (Watchdog)**: Instantly detects new files in your `Incoming` folder.
 
 *   **Dual-Layer Verification**: Identifies files by name (AI) and by content (ED2K Hash / Fingerprint). 
-+
-+*   **Directory Support (Folder Grouping)**: SmartMule detects if a download is a folder (e.g., a movie with subtitles). It identifies the main file for hashing and metadata but moves and renames the **entire folder** as a single functional unit.
 
-*   **Semantic Antimalware**: Deep inspection of compressed files (`.zip`, `.rar`, `.7z`) without extraction, using VirusTotal. Features an **Smart Triage** system that prioritizes detections from TOP engines (Microsoft, Kaspersky, ESET, etc.) for zero-tolerance security against modern threats.
+*   **Folder Grouping Support**: SmartMule detects if a download is a folder (e.g., a movie with subtitles). It identifies the main file for hashing and metadata but moves and renames the **entire folder** as a single functional unit.
 
-*   **Intelligent Tie-Breaking**: Uses real video duration to distinguish between homonymous movies (e.g., Solaris 1972 vs Solaris 2002).
+*   **Semantic Antimalware (Elite Triage)**: Deep file inspection without extraction using **VirusTotal**. SmartMule trusts no one:
+    -   **Macro Analysis**: Detects Office documents with macros (`.xlsm`, `.docm`, etc.) and legacy formats (`.doc`, `.xls`), treating them as executables for preventive triage.
+    -   **PDF Surveillance**: Automatic scanning of PDF files for potential malicious scripts.
+    -   **Archive Inspection**: The `ArchiveInspector` analyzes `.zip`, `.rar`, and `.7z` files searching for inconsistencies (e.g., an `.exe` disguised as a movie) and displaying suspicious content in the logs.
+    -   **Critical Scores**: If a file has more than 5 detections on VT (prioritizing TOP engines like Microsoft or Kaspersky), it automatically moves it to a **Review** folder.
+
+*   **Intelligent Tie-Breaking**: Uses real video duration to distinguish between movies with the same name (e.g., Solaris 1972 vs. Solaris 2002).
 
 *   **Automated Triage**: 
     -   `MALICIOUS`: Automatic destructive deletion.
