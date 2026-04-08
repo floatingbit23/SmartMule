@@ -29,7 +29,7 @@ from pathlib import Path
 
 from Crypto.Hash import MD4  # pycryptodome: implementación del algoritmo MD4
 
-from smartmule.config import ED2K_CHUNK_SIZE # 9,728,000 bytes (9.28 MB)
+from smartmule.config import ED2K_CHUNK_SIZE, IGNORED_EXTENSIONS # ED2K_CHUNK_SIZE: 9,728,000 bytes (9.28 MB)
 
 # Creo un logger específico para este módulo.
 logger = logging.getLogger("SmartMule.hasher")
@@ -235,11 +235,21 @@ def get_main_file_in_dir(dir_path: Path) -> Optional[Path]:
 
     """
     Busca el archivo más grande dentro de un directorio (recursivo).
+    Excluye archivos con extensiones ignoradas (temporales de eMule/Torrent).
     Esto nos permite identificar el vídeo principal en una carpeta de Release.
     """
 
     try:
-        files = [f for f in dir_path.rglob('*') if f.is_file()]
+        # Filtramos archivos que no sean temporales
+        files = []
+        for f in dir_path.rglob('*'):
+            if f.is_file():
+                # Comprobación de extensiones ignoradas (simple y compuesta)
+                compound_ext = "".join(f.suffixes).lower()
+                # Importante: IGNORED_EXTENSIONS ya está disponible por el import arriba
+                if compound_ext in IGNORED_EXTENSIONS or f.suffix.lower() in IGNORED_EXTENSIONS:
+                    continue
+                files.append(f)
 
         if not files:
             return None

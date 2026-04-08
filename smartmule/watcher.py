@@ -81,7 +81,7 @@ class IncomingHandler(FileSystemEventHandler):
     # Método para manejar la creación de archivos
     def on_created(self, event: FileSystemEvent) -> None:
         """
-        Reacciono cuando Windows me notifica que se ha creado un archivo nuevo
+        Reacciono cuando se crea un archivo o se mueve algo nuevo (externo)
         en la carpeta Incoming. Este es el evento principal que me interesa:
         eMule crea el archivo aquí cuando termina una descarga.
 
@@ -92,6 +92,26 @@ class IncomingHandler(FileSystemEventHandler):
             event: Evento del sistema de archivos con la ruta del archivo.
         """
         self._handle_event(event)
+
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+
+        """
+        Reacciono cuando un archivo es eliminado de Incoming.
+        Si había un temporizador de debounce activo para este archivo, lo cancelo
+        para no procesar "fantasmas" y evitar logs innecesarios.
+        """
+        
+        src_path = Path(event.src_path)
+        top_level_item = self._get_top_level_item(src_path)
+        
+        if top_level_item:
+            abs_path = str(top_level_item.resolve())
+            with self._lock:
+                if abs_path in self._timers:
+                    self._timers[abs_path].cancel()
+                    del self._timers[abs_path]
+                    logger.debug(f"🗑️  Archivo eliminado: Timer cancelado para '{top_level_item.name}'")
 
 
     # Método para manejar la modificación de archivos
@@ -180,30 +200,50 @@ class IncomingHandler(FileSystemEventHandler):
     def _should_ignore(self, file_path: Path) -> bool:
 
         """
-        Decido si debo ignorar un archivo basándome en su extensión.
+        Decido si debo ignorar un archivo o carpeta basándome en su extensión.
 
-        Los archivos temporales de eMule (.part, .part.met, .part.met.bak)
-        aparecen constantemente mientras las descargas están en curso.
-        Procesarlos sería un desperdicio de recursos y causaría errores.
-
-        Compruebo los sufijos compuestos primero porque .part.met.bak tiene
-        tres niveles de extensión y Path.suffix solo devuelve el último (".bak").
+        1. Compruebo si el propio ítem tiene una extensión ignorada (.part, .!ut, etc).
+        2. Si no, y es una carpeta, compruebo si contiene algún archivo con extensión ignorada.
 
         Args:
-            file_path: Ruta del archivo a evaluar.
+            file_path: Ruta del ítem a evaluar.
 
         Returns:
-            True si debo ignorar el archivo.
+            True si debo ignorar el ítem.
+        """
+        
+        # Primero: ¿el propio archivo/carpeta tiene una extensión prohibitiva?
+        # Esto cubre archivos individuales y casuísticas de test con rutas virtuales.
+        if self._is_extension_ignored(file_path):
+            return True
+
+        # Segundo: Si es un directorio que EXISTE, miramos su contenido.
+        if file_path.is_dir():
+            try:
+                # rglob('*') es recursivo.
+                for sub_item in file_path.rglob('*'):
+                    if sub_item.is_file() and self._is_extension_ignored(sub_item):
+                        logger.debug(f"📁  Directorio '{file_path.name}' ignorado (contiene archivos temporales: {sub_item.name})")
+                        return True
+            except Exception as e:
+                logger.warning(f"⚠️  Error al inspeccionar contenido de carpeta {file_path.name}: {e}")
+            
+            return False
+
+        return False
+
+    def _is_extension_ignored(self, file_path: Path) -> bool:
+
+        """Helper para comprobar extensiones simples y compuestas.
+        Devuelve True si la extensión está en IGNORED_EXTENSIONS.
         """
 
         # Compruebo extensiones compuestas concatenando los sufijos.
-        # Para "file.part.met.bak": suffixes = ['.part', '.met', '.bak']
-        # Concateno para obtener ".part.met.bak" y verifico si está en IGNORED.
         compound_ext = "".join(file_path.suffixes).lower()
         if compound_ext in IGNORED_EXTENSIONS:
             return True
 
-        # También verifico la extensión simple para archivos como "file.tmp"
+        # También verifico la extensión simple
         if file_path.suffix.lower() in IGNORED_EXTENSIONS:
             return True
 
@@ -279,7 +319,7 @@ class IncomingHandler(FileSystemEventHandler):
         # o movido durante los segundos de debounce.
         if not file_path.exists():
             logger.warning(
-                f"Archivo '{file_path.name}' ya no existe tras el debounce. "
+                f"⚠️  Archivo '{file_path.name}' ya no existe tras el debounce. "
                 f"Posiblemente fue eliminado o movido."
             )
             return

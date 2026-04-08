@@ -32,6 +32,9 @@ smartmule.pid
 
 # Temporales del proyecto
 tmp/
+*task*.md
+*implementation_plan*.md
+*walkthrough*.md
 
 # Archivos de OS
 .DS_Store

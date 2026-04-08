@@ -3,6 +3,7 @@ import json
 import logging
 from google import genai
 import openai
+import time
 
 from smartmule.config import GEMINI_API_KEY, USE_LOCAL_LLM, LMSTUDIO_API_KEY, LOCAL_LLM_URL
 
@@ -46,36 +47,45 @@ def parse_with_llm(filename: str) -> dict:
 
 
 def _call_gemini(filename: str) -> dict:
-
     """Llama a la nube usando Gemini 2.5 Flash (vía SDK google-genai)."""
     
     if not GEMINI_API_KEY or GEMINI_API_KEY == "tu_gemini_api_key":
         logger.error("❌ GEMINI_API_KEY no encontrada. Por favor, revisa tu .env o habilita USE_LOCAL_LLM.")
         return {"title": filename, "confidence": "failed", "error": "Missing API Key"}
 
-    try:
-        # Iniciamos el cliente de la nueva librería google-genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        # Inferencia con salida JSON forzada
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', # Modelo a usar
-            contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'", # Prompt + archivo a analizar
-            config={'response_mime_type': 'application/json'} # Forzamos la salida en JSON
-        )
-        
-        # La respuesta ya viene estructurada en .text
+    max_retries = 3
+    retry_delay = 5 # segundos
 
-        # Convertimos el string JSON a diccionario
-        result = json.loads(response.text) 
-        # Para tracking interno
-        result["confidence"] = "ai" 
+    for attempt in range(max_retries):
+        try:
+            # Iniciamos el cliente de la nueva librería google-genai
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            
+            # Inferencia con salida JSON forzada
+            response = client.models.generate_content(
+                model='gemini-2.5-flash', # Modelo a usar
+                contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'", # Prompt + archivo a analizar
+                config={'response_mime_type': 'application/json'} # Forzamos la salida en JSON
+            )
+            
+            # Convertimos el string JSON a diccionario
+            result = json.loads(response.text) 
+            result["confidence"] = "ai" 
+            return result
+            
+        except Exception as e:
 
-        return result
-        
-    except Exception as e:
-        logger.error(f"❌ Error en Gemini (google-genai): {e}")
-        return {"title": filename, "confidence": "failed", "error": str(e)}
+            error_msg = str(e)
+
+            # Si es un error 503 (Servicio no disponible/Sobrecarga), reintentamos
+            if "503" in error_msg and attempt < max_retries - 1:
+                logger.warning(f"⚠️  Gemini sobrecargado (503). Reintentando en {retry_delay}s... (Intento {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay *= 2 # Backoff exponencial simple
+                continue
+            
+            logger.error(f"❌ Error en Gemini (google-genai): {e}")
+            return {"title": filename, "confidence": "failed", "error": error_msg}
 
 
 def _call_local_llm(filename: str) -> dict:

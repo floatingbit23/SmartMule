@@ -4,7 +4,7 @@ import logging
 import re
 
 from pathlib import Path
-from smartmule.config import LIBRARY_PATH
+from smartmule.config import LIBRARY_PATH, ORGANIZER_MODE
 from smartmule.notifications import send_notification
 
 logger = logging.getLogger("SmartMule.organizer")
@@ -48,7 +48,7 @@ class LibraryOrganizer:
         
         # Si el archivo no existe, logueo error y retorno
         if not source_path.exists():
-            logger.error(f"❌ [Organizer] Archivo origen no encontrado: {source_path.name}")
+            logger.error(f"❌  Archivo origen no encontrado: {source_path.name}")
             return file_path_str
 
         # Obtengo los datos de la API
@@ -68,7 +68,7 @@ class LibraryOrganizer:
             # 1. EVALUACIÓN DE PELIGRO EXTREMO (MALICIOUS)
             if "MALICIOUS" in verdict:
 
-                logger.critical(f"💀 [Organizer] MALWARE CONFIRMADO!!! Borrando: {filename}")
+                logger.critical(f"💀 MALWARE CONFIRMADO!!! Borrando: {filename}")
 
                 # Borro el ítem directamente. shutil.rmtree para carpetas, os.remove para archivos.
                 if source_path.is_dir():
@@ -78,21 +78,33 @@ class LibraryOrganizer:
                 
                 send_notification("Malware Eliminado 💀", f"Se ha detectado malware encubierto en '{filename}' y ha sido borrado permanentemente por seguridad.", is_critical=True)
 
-                logger.critical(f"🗑️ [Organizer] Ítem {filename} eliminado permanentemente del sistema por su seguridad.")
+                logger.critical(f"🗑️ Ítem {filename} eliminado permanentemente del sistema por su seguridad.")
                 
                 return "<DELETED_MALICIOUS>"
 
             # 2. EVALUACIÓN DE RIESGO MEDIO (SUSPICIOUS)
             if "SUSPICIOUS" in verdict:
 
-                logger.warning(f"⚠️ [Organizer] Archivo sospechoso movido a revisión: {filename}")
+                logger.warning(f"⚠️  Archivo sospechoso movido a revisión: {filename}")
 
-                dest_path = self.review_dir / filename # Ruta 01_Review/filename
+                dest_path = self.review_dir / filename 
+                
+                # Manejo de duplicados en Review
+                counter = 1
+                base_stem = source_path.stem
+                if source_path.is_dir():
+                    suffix = ""
+                else:
+                    suffix = source_path.suffix
+                
+                while dest_path.exists():
+                    dest_path = self.review_dir / f"{base_stem}_{counter}{suffix}"
+                    counter += 1
 
-                shutil.move(str(source_path), str(dest_path)) # Muevo el archivo
+                self._transfer_item(source_path, dest_path) 
                 send_notification("Archivo Sospechoso ⚠️", f"El archivo '{filename}' ha sido puesto en cuarentena para su revisión manual.", is_critical=True)
 
-                return str(dest_path) # Retorno la ruta final
+                return str(dest_path) 
 
             # 3. ARCHIVOS LIMPIOS Y NORMALES (SAFE o UNKNOWN sin riesgo)
 
@@ -125,31 +137,32 @@ class LibraryOrganizer:
 
             # --- CAPA DE EMBELLECIMIENTO (Renombrado Inteligente) ---
             
-            # 1. Intentamos obtener el título oficial de las APIs, si no, vamos al título limpio
+            # 1. Obtenemos extensión y base
+            suffix = source_path.suffix if source_path.is_file() else ""
+            base_name = filename 
 
-            base_name = filename # Fallback por defecto (nombre en el P2P)
-            
             api_data = metadata.get("api_data") 
 
-            # Si la API nos dio un título oficial, lo usamos. Si no, usamos el título limpio de Regex/LLM
+            # 2. Intentamos obtener el título oficial de las APIs
             if api_data and api_data.get("official_title"):
                 base_name = api_data["official_title"]
+                
+                # Si el título oficial ya trae la extensión, se la quitamos para no duplicar
+                if suffix and base_name.lower().endswith(suffix.lower()):
+                    base_name = base_name[:-len(suffix)]
+
             elif metadata.get("title"):
                 base_name = metadata["title"]
 
-            # 2. Añadimos el año si lo conocemos para un look profesional
-
+            # 3. Añadimos el año si lo conocemos para un look profesional
             year = metadata.get("year")
             if year:
                 pretty_name = f"{base_name} ({year})"
             else:
                 pretty_name = base_name
 
-            # 3. Saneamos el nombre (eliminamos carácteres prohibidos por el OS: : / \ * ? " < > |)
+            # 4. Saneamos el nombre (eliminamos carácteres prohibidos)
             clean_filename = re.sub(r'[\\/:*?"<>|]', '', pretty_name).strip()
-            
-            # 4. Restauramos la extensión original (solo si es un archivo)
-            suffix = source_path.suffix if source_path.is_file() else ""
             
             final_filename = f"{clean_filename}{suffix}"
 
@@ -166,8 +179,8 @@ class LibraryOrganizer:
             # Ejemplo: "The.Matrix.1999.mp4" -> "The.Matrix.1999_1.mp4"
             # Ejemplo Carpeta: "Peli_2024" -> "Peli_2024_1"
 
-            # 5. Realizamos el movimiento/renombrado físico
-            shutil.move(str(source_path), str(dest_path))
+            # 5. Realizamos transferencia física según modo (Move, Copy, Hardlink)
+            self._transfer_item(source_path, dest_path)
             
             # Selecciono el emoji correspondiente a la categoría para el log final
             if folder_name == "Movies_and_Series":
@@ -189,7 +202,7 @@ class LibraryOrganizer:
             else:
                 emoji = "📁"
            
-            logger.info(f"{emoji} [Organizer] Movido a Biblioteca ({folder_name}): {dest_path.name}")
+            logger.info(f"{emoji} Movido a Biblioteca ({folder_name}): {dest_path.name}")
             
             # Formatear un título amigable según la carpeta
             cat_name = folder_name.replace("_and_", " y ").replace("_", " ")
@@ -198,5 +211,75 @@ class LibraryOrganizer:
             return str(dest_path)
 
         except Exception as e:
-            logger.error(f"❌ [Organizer] Fallo organizando {filename}: {e}")
+            logger.error(f"❌ Fallo organizando {filename}: {e}")
             return file_path_str
+            
+    # Función para transferir el archivo o directorio
+    def _transfer_item(self, src: Path, dest: Path) -> None:
+
+        """
+        Transfiere el archivo o directorio basándose en ORGANIZER_MODE ("move", "copy", "hardlink").
+        Si falla un hardlink por error de partición cruzada, realiza silenciosamente un fallback a "copy".
+        """
+
+        mode = ORGANIZER_MODE # Obtengo el modo de transferencia
+
+        # Si el modo es "move", muevo el archivo o directorio
+        if mode == "move":
+            shutil.move(str(src), str(dest))
+            
+        # Si el modo es "copy", copio el archivo o directorio
+        elif mode == "copy":
+            
+            if src.is_dir():
+                shutil.copytree(src, dest) # el directorio se copia con todos sus archivos y subdirectorios
+            else:
+                shutil.copy2(src, dest) # el archivo se copia con todos sus metadatos
+                
+        # Si el modo es "hardlink", creo un hardlink del archivo o directorio
+        elif mode == "hardlink":
+
+            try:
+
+                if src.is_dir():
+
+                    # Para carpetas, recreo la estructura de carpetas y hardlinkeo cada fichero base
+                    dest.mkdir(parents=True, exist_ok=True)
+
+                    for root, dirs, files in os.walk(src):
+
+                        root_path = Path(root)
+
+                        # Replicamos subdirectorios
+                        for d in dirs:
+                            rel_path = (root_path / d).relative_to(src)
+                            (dest / rel_path).mkdir(parents=True, exist_ok=True)
+                            
+                        # Hardlinks de los archivos
+                        for f in files:
+                            rel_path = (root_path / f).relative_to(src)
+                            os.link(root_path / f, dest / rel_path)
+                
+                else:
+                    os.link(src, dest)
+
+            # Si falla un hardlink por error de partición cruzada, realiza silenciosamente un fallback a "copy"
+            except OSError as e:
+
+                import errno
+                # Catch Cross-device link condition (Diferentes unidades como C: a D:)
+
+                if e.errno == errno.EXDEV:
+                    logger.warning(f"⚠️  ¡Archivo en distinta partición!. Realizando copia en vez de hardlink para: {src.name}...")
+
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dest)
+                else:
+                    raise # Rethrow si fuera error por falta de permisos u otra anomalía
+
+        else:
+            # Fallback the fallback en caso de environment variable mal tipada
+            shutil.move(str(src), str(dest))
+

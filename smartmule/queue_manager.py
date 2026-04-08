@@ -23,7 +23,7 @@ from typing import Callable, Optional
 
 from smartmule.hasher import calculate_ed2k, format_ed2k_link, calculate_fingerprint
 from smartmule.database import HashDatabase
-from smartmule.config import DB_PATH
+from smartmule.config import DB_PATH, IGNORED_EXTENSIONS
 from smartmule.metadata_engine import MetadataEngine
 from smartmule.organizer import LibraryOrganizer
 
@@ -153,7 +153,20 @@ class QueueManager:
         try:
             # Obtengo el tamaño. Si es carpeta, sumo el tamaño de todo el contenido.
             if file_path.is_dir():
-                file_size = sum(f.stat().st_size for f in file_path.rglob('*') if f.is_file())
+
+                file_size = 0
+
+                # Recorro todos los archivos dentro de la carpeta
+                for f in file_path.rglob('*'):
+
+                    if f.is_file():
+                        
+                        # Excluimos temporales del cálculo de tamaño
+                        compound_ext = "".join(f.suffixes).lower()
+                        if compound_ext in IGNORED_EXTENSIONS or f.suffix.lower() in IGNORED_EXTENSIONS:
+                            continue # Evita que los temporales de eMule o Torrent sumen al tamaño total de la carpeta
+
+                        file_size += f.stat().st_size # Sumo el tamaño del archivo
             else:
                 file_size = file_path.stat().st_size
 
@@ -258,10 +271,10 @@ class QueueManager:
                 # Si la cola está vacía y se agotó el timeout, simplemente vuelvo al principio del bucle.
                 continue
 
-            # Si recibo None (el centinela) como tarea, es la señal de parada.
+            # Si recibo None (el centinela) como tarea o un objeto con el atributo is_sentinel=True, es la señal de parada.
             # Esto me permite hacer un shutdown limpio.
 
-            if task is None:
+            if task is None or getattr(task, 'is_sentinel', False):
                 logger.debug("ℹ️  Worker recibió señal de parada (centinela)")
                 self._queue.task_done() # Marco la tarea como completada
                 break # Salgo del bucle
@@ -280,16 +293,24 @@ class QueueManager:
                     exc_info=True, # Muestro el traceback completo
                 )
 
-            # Bloque finally: se ejecuta SIEMPRE, tanto si hubo error como si no.
+            # Bloque finally: limpieza del estado
             finally: 
-                # Pase lo que pase, libero la ruta del registro de activos.
-                with self._lock:
-                    # task puede ser None si falló el get(), pero aquí ya sabemos que es un FileTask
-                    if task is not None:
-                        abs_path = str(Path(task.file_path).resolve())
-                        self._active_paths.discard(abs_path)
+                if task is not None:
+                    # Obtenemos la ruta absoluta del archivo terminado
+                    abs_path = str(Path(task.file_path).resolve())
 
-                self._queue.task_done() # Marco la tarea como completada (necesario para que join() funcione correctamente)
+                    # NOTA: No eliminamos la ruta de 'active_paths' inmediatamente. 
+                    # Esperamos 5 segundos para ignorar los "ecos" que genera Windows al crear Hardlinks
+                    # o cambiar atributos justo después de mover/organizar el archivo.
+                    def _delayed_remove(p):
+                        with self._lock:
+                            self._active_paths.discard(p)
+                            logger.debug(f"🧹 Ruta liberada del registro de activos: {Path(p).name}")
+
+                    import threading
+                    threading.Timer(5.0, _delayed_remove, [abs_path]).start()
+
+                self._queue.task_done() # Marco la tarea como completada
 
         # Cuando el bucle termina (porque stop_event está activo), salgo del método.
         logger.info("ℹ️  Worker detenido limpiamente")
@@ -345,16 +366,27 @@ class QueueManager:
             actual_mtime = int(file_path.stat().st_mtime)
             cached_mtime = existing.get('file_mtime', 0)
 
-            if existing.get('is_organized', 0) == 1 and existing.get('security_verdict') != '':
+            # Si el archivo ya está organizado, verificamos si el mtime coincide y si el archivo sigue existiendo en destino.
+            if existing.get('is_organized', 0) == 1:
                 
+                final_path_str = existing.get('final_path', '')
+                final_path = Path(final_path_str) if final_path_str else None
+
                 # Si el mtime NO coincide, el archivo fue manipulado desde la última vez.
                 # Lo marcamos para recalcular el hash pero intentando ahorrar APIs si el hash es el mismo.
                 if actual_mtime != cached_mtime:
                     logger.info(f"⚠️  Detectado cambio en la fecha de modificación de {file_name}. Verificando integridad del hash...")
                     force_rehash = True # Vamos a la Fase 2, pero con cautela.
                 
+                # Si el archivo fue borrado de la biblioteca, forzamos re-organización
+                elif final_path and not final_path.exists():
+                    logger.warning(f"⚠️  El registro indica que ya estaba organizado, pero NO ha sido encontrado en: {final_path_str}")
+                    logger.info(f"ℹ️  Forzando re-organización de {file_name}...")
+                    # No activamos force_rehash porque el contenido es el mismo! (mtime coincide), solo queremos que pase por el Organizer de nuevo.
+                
+                # Si el mtime coincide y el archivo existe, el archivo NO ha sido manipulado, entonces lo saltamos.
                 else:
-                    ed2k_hash = existing['ed2k_hash']
+                    ed2k_hash = existing['ed2k_hash'] 
                     ed2k_link = existing['ed2k_link']
                     processed_at_raw = existing['processed_at']
 
@@ -424,7 +456,7 @@ class QueueManager:
         engine = MetadataEngine() # Instancio el motor de metadatos
         metadata_dict = engine.identify_file(file_name, str(file_path))  # Pipeline completo de metadatos
         
-        # === FASE 5: Organización en Disco (Reto 5) ===
+        # === FASE 5: Organización en Disco ===
         
         organizer = LibraryOrganizer() # Instancio el organizador
         final_path = organizer.organize(str(file_path), metadata_dict) # Organizo el archivo
@@ -450,8 +482,11 @@ class QueueManager:
         logger.info("Deteniendo worker...")
         self._stop_event.set()
 
-        # El centinela 'None' hará que el Worker Thread salga del Worker Loop en el próximo get().
-        self._queue.put(None)
+        # El centinela hará que el Worker Thread salga del Worker Loop en el próximo get().
+        # Usamos prioridad 0 para que salte al principio de la cola.
+        sentinel = FileTask(priority=0, file_path="STOP", file_size=0)
+        setattr(sentinel, 'is_sentinel', True)
+        self._queue.put(sentinel)
 
         # Espero a que el hilo termine, pero con un timeout de 10 segundos por si algo se queda colgado.
         self._worker_thread.join(timeout=10)

@@ -106,6 +106,7 @@ def test_metadata_engine_software_directory_targets_file(tmp_path):
             # Configuramos el mock para que devuelva un resultado válido
             mock_vt.return_value = {
                 "stats": {"malicious": 0, "suspicious": 0},
+                "results": {},
                 "hash": "fakehash123"
             }
             

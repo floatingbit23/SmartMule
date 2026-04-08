@@ -36,6 +36,8 @@ By default, eMule places all completed downloads into a single `Incoming` folder
     -   `MALICIOUS`: Automatic destructive deletion.
     -   `SUSPICIOUS`: Quarantine for manual review.
     -   `SAFE`: Automated thematic organization and renaming.
+    ![alt text](/images/suspicious.png)
+    ![alt text](/images/antimalware.png)
 
 *   **Privacy**: Compatible with local models (LM Studio) to process names without uploading them to the cloud.
 
@@ -111,6 +113,20 @@ To maintain visibility on the network and continue earning credits after organiz
 3.  **Maintain Credits**: Your credits are associated with your *User Identification* (Hash), not file names. By sharing the `Library` with cleaned and renamed files, eMule will recognize that you have the same content (same ED2K Hash) and you will continue to accumulate upload priority.
 
 4.  **Update**: After starting SmartMule for the first time, go to eMule's **Shared Files** tab and click the **Reload** button so that the new names appear on the network instantly.
+
+---
+
+## Torrent Configuration (BitTorrent, uTorrent, qBittorrent)
+
+SmartMule is fully compatible with Torrent download managers. Because Torrent networks stop *seeding* (sharing) if you change the file's location, SmartMule defaults to creating **Hardlinks** for files coming from these networks.
+
+1.  **Extensions Settings (Crucial)**: To prevent SmartMule from processing unfinished files, it is mandatory that you enable the option in your Torrent client to add an extension to incomplete downloads. (e.g. *`Append .!ut to incomplete files`* in uTorrent or *`Append .!qB to incomplete files`* in qBittorrent).
+
+    ![alt text](images/torrent_conf.png)
+
+2.  **Same Drive**: _Hardlinks_ require that both the `Incoming` folder and the `Library` folder reside on the same system partition or hard drive.
+
+3.  **Mode configuration**: You can alter the behavior by modifying the `ORGANIZER_MODE` variable in your `.env` (`hardlink` by default, but you can choose `copy` or `move`).
 
 ---
 

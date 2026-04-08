@@ -81,7 +81,7 @@ class VirusTotalClient:
         if not file_hash:
             return None
             
-        logger.info(f"⏳ [VT] Hash SHA-256 calculado: {file_hash[:8]}... \nConsultando base mundial...")
+        logger.info(f"⏳ [VT] Hash SHA-256 calculado: {file_hash[:8]}...  ℹ️  Consultando base mundial...")
 
         self._wait_for_rate_limit()
 
@@ -93,9 +93,10 @@ class VirusTotalClient:
             
             # Si VT no lo tiene en su BD (archivo desconocido nunca subido) devuelve 404
             if response.status_code == 404:
-                logger.warning("⚠️ [VT] Archivo desconocido en VirusTotal. Nadie lo ha analizado aún!")
+                logger.warning("⚠️  [VT] Archivo desconocido en VirusTotal. Nadie lo ha analizado aún!")
                 return {
                     "stats": {"malicious": 0, "suspicious": -1, "undetected": 100},
+                    "results": {}, # No hay resultados por motor si no existe el archivo
                     "hash": file_hash
                 }
 
@@ -103,12 +104,16 @@ class VirusTotalClient:
             data = response.json() # Convierte la respuesta JSON a diccionario
             
             if data and "data" in data and "attributes" in data["data"]: # Comprueba si la respuesta contiene los datos esperados
-
-                stats = data["data"]["attributes"].get("last_analysis_stats") # Obtiene el bloque last_analysis_stats
+                
+                # Obtenemos los bloques de estadísticas (resumen) y resultados (detallado)
+                attributes = data["data"]["attributes"]
+                stats = attributes.get("last_analysis_stats")
+                results = attributes.get("last_analysis_results", {})
 
                 return {
-                    "stats": stats, # Devuelve el bloque last_analysis_stats
-                    "hash": file_hash # Devuelve el hash SHA-256 del archivo
+                    "stats": stats, 
+                    "results": results, # Diccionario con el detalle de cada motor
+                    "hash": file_hash
                 }
                 
             return None # Devuelve None si la respuesta no contiene los datos esperados

@@ -46,6 +46,12 @@ DB_PATH: Path = LIBRARY_PATH / ".data" / "smartmule.db"
 # Windows genera múltiples eventos (created + modified) para una sola operación de archivo, así que necesito este margen (3 segundos) para agruparlos en una sola acción.
 DEBOUNCE_SECONDS: float = float(os.getenv("DEBOUNCE_SECONDS", "3.0"))
 
+# Modo de organización de archivos en la biblioteca:
+# 'move': Mueve el archivo (corta el seeding de Torrent, ok para eMule)
+# 'copy': Copia el archivo (consume el doble de espacio)
+# 'hardlink': Crea un enlace duro (óptimo para seeding de Torrents en el mismo disco)
+ORGANIZER_MODE: str = os.getenv("ORGANIZER_MODE", "hardlink").lower()
+
 
 # === Parámetros del File Locker (retry con backoff exponencial) ===
 
@@ -69,8 +75,8 @@ FILE_LOCK_MAX_DELAY: float = 15.0
 
 # === Extensiones a ignorar ===
 
-# Estas son las extensiones de los archivos temporales de eMule.
-# Los ignoro completamente porque son archivos incompletos o metadatos internos de eMule que no debo procesar. 
+# Estas son las extensiones de los archivos temporales de eMule y clientes Torrent.
+# Los ignoro completamente porque son archivos incompletos o metadatos internos que no debo procesar. 
 
 # El Watcher descartará cualquier evento que involucre archivos con estas extensiones:
 IGNORED_EXTENSIONS: set = {
@@ -78,6 +84,10 @@ IGNORED_EXTENSIONS: set = {
     ".part.met",      # Metadatos de la descarga en curso
     ".part.met.bak",  # Backup de los metadatos
     ".tmp",           # Archivos temporales genéricos
+    ".!ut",           # Temporal de uTorrent
+    ".!qb",           # Temporal de qBittorrent
+    ".bc!",           # Temporal de BitComet
+    ".az!",           # Temporal de Vuze/Azureus
 }
 
 

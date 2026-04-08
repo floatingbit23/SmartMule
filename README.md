@@ -36,6 +36,11 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
     -   `MALICIOUS`: Borrado automático destructivo.
     -   `SUSPICIOUS`: Cuarentena para revisión manual.
     -   `SAFE`: Organización temática automatizada.
+
+    ![alt text](/images/suspicious.png)
+    ![alt text](/images/antimalware.png)
+
+
 *   **Privacidad**: Compatible con modelos locales (LM Studio) para procesar nombres sin subirlos a la nube.
 
 ---
@@ -109,8 +114,19 @@ Para no perder visibilidad en la red ni dejar de ganar créditos tras la organiz
 
 3.  **Mantener Créditos**: Tus créditos están asociados a tu *User Identification* (Hash), no a los nombres de los archivos. Al compartir la `Library` con los archivos ya limpios y renombrados, eMule reconocerá que tienes el mismo contenido (mismo Hash ED2K) y seguirás sumando prioridad de subida.
 
-4.  **Actualización**: Tras el primer arranque de SmartMule, ve a la pestaña **Compartidos** de eMule y pulsa el botón **Recargar** para que los nuevos nombres aparezcan en la red al instante.
+---
 
+## Configuración para Torrents (BitTorrent, uTorrent, qBittorrent)
+
+SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a que las redes Torrent detienen el *seeding* (compartir) si cambias el archivo de sitio, SmartMule usa por defecto la creación de **Hardlinks** para los archivos de estas redes.
+
+1.  **Ajustes de Extensiones (Crucial)**: Para prevenir que SmartMule procese archivos sin terminar, es obligatorio que actives la opción de de tu cliente de Torrent para agregar una extensión a las descargas incompletas. (Ej. *`Append .!ut to incomplete files`* en uTorrent o *`Añadir !qB a descargas incompletas`* en qBittorrent).
+
+    ![alt text](images/torrent_conf.png)
+
+2.  **Mismo Disco**: Los _Hardlinks_ exigen que la carpeta `Incoming` y la `Library` estén en la misma partición del sistema o disco duro.
+
+3.  **Configuración de Modo**: Puedes alterar el comportamiento modificando la variable `ORGANIZER_MODE` en tu `.env` (`hardlink` por defecto, pudiendo elegir `copy` o `move`).
 
 ---
 

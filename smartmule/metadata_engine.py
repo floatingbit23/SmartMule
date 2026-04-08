@@ -11,6 +11,7 @@ from smartmule.api.tmdb_client import TMDBClient
 from smartmule.api.openlibrary_client import OpenLibraryClient
 from smartmule.api.musicbrainz_client import MusicBrainzClient
 from smartmule.api.virustotal_client import VirusTotalClient
+from smartmule.config import TMDB_BEARER_TOKEN, TMDB_BASE_URL, IGNORED_EXTENSIONS
 
 logger = logging.getLogger("SmartMule.engine")
 
@@ -48,22 +49,22 @@ class MetadataEngine:
         # Si es un directorio, buscamos el archivo "base" (el más grande que sea video/audio)
         if is_directory:
             
-            logger.info(f"📂 [Engine] Procesando directorio: {display_name}")
+            logger.info(f"📂  Procesando directorio: {display_name}")
             representative = self._find_representative_file(item_path)
             
             # Definimos el objetivo para escaneos técnicos (VT, MediaInspector, etc.)
             if representative:
                 technical_target = str(representative)
-                logger.info(f"🔍 [Engine] Archivo representante encontrado: {representative.name}")
+                logger.info(f"🔍  Archivo representante encontrado: {representative.name}")
 
                 # Si el nombre del archivo representante es muy genérico, preferimos usar el nombre de la carpeta
                 if len(representative.stem) < 5 or representative.stem.lower() in ["movie", "video", "cd1", "cd2"]:
-                    logger.info(f"ℹ️  [Engine] Usando nombre de carpeta para identificar (nombre de archivo genérico)")
+                    logger.info(f"ℹ️  Usando nombre de carpeta para identificar (nombre de archivo genérico)")
                 else:
                     filename = representative.name
             else:
                 technical_target = filepath
-                logger.warning(f"⚠️  [Engine] No se encontró un archivo multimedia claro en la carpeta {display_name}")
+                logger.warning(f"⚠️  No se encontró un archivo multimedia claro en la carpeta {display_name}")
         else:
             technical_target = filepath
 
@@ -140,7 +141,7 @@ class MetadataEngine:
 
             if inspection["status"] == "SAFE" and inspection.get("detected_media"):
 
-                logger.info(f"🔄 [Engine] Reclasificando media_type por contenido interno: 'compressed' -> '{inspection['detected_media']}'")
+                logger.info(f"🔄 Reclasificando media_type por contenido interno: 'compressed' -> '{inspection['detected_media']}'")
                 
                 media_type = inspection["detected_media"] # Obtenemos el Media Type
                 data["media_type"] = media_type # Actualizamos el Media Type
@@ -163,10 +164,10 @@ class MetadataEngine:
 
             # TMDB diferencia Películas de Series
             if data.get("season"):
-                logger.info("📺 [Engine] Buscando en TMDB como Serie...")
+                logger.info("📺 Buscando en TMDB como Serie...")
                 results = self.tmdb.search_tv(titulo_limpio, year) 
             else:
-                logger.info("🎬 [Engine] Buscando en TMDB como Película...")
+                logger.info("🎬 Buscando en TMDB como Película...")
                 results = self.tmdb.search_movie(titulo_limpio, year)
 
             # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
@@ -177,7 +178,7 @@ class MetadataEngine:
                 titulo_alternativo = self._get_plan_b_title(titulo_limpio)
 
                 if titulo_alternativo:
-                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
                     
                     if data.get("season"): # Si es una serie
                         results = self.tmdb.search_tv(titulo_alternativo, year)
@@ -235,14 +236,14 @@ class MetadataEngine:
                 
         elif media_type == "book":
 
-            logger.info("📚 [Engine] Buscando en OpenLibrary como Libro...")
+            logger.info("📚 Buscando en OpenLibrary como Libro...")
             api_result = self.openlibrary.search_book(titulo_limpio)
 
             # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
             if not api_result:
                 titulo_alternativo = self._get_plan_b_title(titulo_limpio)
                 if titulo_alternativo:
-                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
                     api_result = self.openlibrary.search_book(titulo_alternativo)
 
             # Si se encontró resultado
@@ -250,7 +251,7 @@ class MetadataEngine:
                 similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
                 
                 if similitud < 0.7:
-                    logger.warning(f"⚠️ [Engine] Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
+                    logger.warning(f"⚠️  Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
                     api_result = None
                 else:
                     data["api_data"] = {
@@ -264,14 +265,14 @@ class MetadataEngine:
                 
         elif media_type == "audio":
 
-            logger.info("🎵 [Engine] Buscando en MusicBrainz como Audio...")
+            logger.info("🎵  Buscando en MusicBrainz como Audio...")
             api_result = self.musicbrainz.search_audio(titulo_limpio)
 
             # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
             if not api_result:
                 titulo_alternativo = self._get_plan_b_title(titulo_limpio)
                 if titulo_alternativo:
-                    logger.info(f"🔄 [Engine] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                    logger.info(f"🔄  Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
                     api_result = self.musicbrainz.search_audio(titulo_alternativo)
             
             if api_result:
@@ -301,7 +302,7 @@ class MetadataEngine:
                 contiene_titulo = api_title_clean in search_name_clean and len(api_title_clean) > 2
 
                 if similitud_completa < 0.65 and not contiene_titulo:
-                    logger.warning(f"⚠️ [Engine] Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
+                    logger.warning(f"⚠️  Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
                     api_result = None 
                 else:
                     # ¡Aceptado!
@@ -314,42 +315,64 @@ class MetadataEngine:
                     }
 
         elif media_type == "subtitles":
-            logger.info("📝 [Engine] Subtítulos detectados.")
+            logger.info("📝  Subtítulos detectados.")
 
         # Triaje de seguridad para software y archivos comprimidos
         elif media_type == "software" or media_type == "compressed":
 
-            logger.info("💾 [Engine] Software/Archivo comprimido detectado. Iniciando triaje de seguridad con VirusTotal...")
+            logger.info("💾  Software/Archivo comprimido detectado. Iniciando triaje de seguridad con VirusTotal...")
 
             if technical_target:
 
                 # Hacemos el triaje SHA-256 del software
                 vt_result = self.virustotal.scan_software(technical_target)
 
-                # Si se encontró resultado
+                # Si se encontró resultado...
                 if vt_result:
                     stats = vt_result["stats"]
+                    results = vt_result["results"]
                     file_hash = vt_result["hash"]
                     
                     malicious = stats.get("malicious", 0)
                     suspicious = stats.get("suspicious", 0)
 
-                    # Determinamos el veredicto
-                    if malicious == 0 and suspicious == 0:
+                    # --- Validación de Motores (Antivirus) TOP (Elite Triage) ---
+                    TOP_ANTIVIRUS = [
+                        "Microsoft", "Kaspersky", "ESET-NOD32", "BitDefender", 
+                        "Symantec", "Sophos", "TrendMicro", "FireEye", "CrowdStrike"
+                    ]
+                    
+                    top_threats = []
+
+                    # Recorremos los motores TOP
+                    for engine in TOP_ANTIVIRUS:
+                        res = results.get(engine)
+                        
+                        # Si un solo motor TOP lo marca, es categorizado como MALICIOUS directamente
+                        if res and res.get("category") == "malicious":
+                            top_threats.append(engine)
+
+                    # Si ningún motor TOP lo marca, determinamos el veredicto aplicando un umbral de malicious/suspicious
+                    if top_threats:
+                        veredicto = f"\033[91mMALICIOUS !!! (Detected by: {', '.join(top_threats)})\033[0m"
+                    elif malicious == 0 and suspicious == 0:
                         veredicto = "\033[92mSAFE\033[0m" # Verde (seguro)
-                    elif 1 <= malicious <= 3:
+                    elif 1 <= malicious <= 5:
                         veredicto = "\033[93mSUSPICIOUS !\033[0m" # Amarillo (sospechoso)
-                    else:
+                    elif malicious > 5:
                         veredicto = "\033[91mMALICIOUS !!!\033[0m" # Rojo (malicioso)
+                    else:
+                        veredicto = "\033[93mSUSPICIOUS !\033[0m"
                     
                     vt_url = f"https://www.virustotal.com/gui/file/{file_hash}"
 
                     data["api_data"] = {
                         "source": "VirusTotal",
                         "official_title": filename,
-                        "veredicto": veredicto, # SAFE, SUSPICIOUS o MALICIOUS
+                        "veredicto": veredicto,
                         "malicious_count": malicious,
                         "suspicious_count": suspicious,
+                        "top_hits": top_threats,
                         "url": vt_url
                     }
                     
@@ -357,11 +380,11 @@ class MetadataEngine:
                         data["api_data"]["veredicto"] = "\033[93mUNKNOWN (Not found in VT)\033[0m"
            
             else:
-                logger.warning("⚠️ [Engine] No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
+                logger.warning("⚠️  No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
 
         # Si el tipo de medio es desconocido, omitimos la búsqueda en APIs
         else:
-            logger.info("❓ [Engine] Tipo de medio desconocido, omitiendo búsqueda en APIs.")
+            logger.info("❓  Tipo de medio desconocido, omitiendo búsqueda en APIs.")
 
 
         # Imprimir "Tarjeta de Metadatos" resumen en el log
@@ -388,10 +411,11 @@ class MetadataEngine:
                     logger.info(f"    - Informe VT: {ad['url']}")
 
         else:
-            logger.info("⚠️ [Engine] No se obtuvieron metadatos oficiales de las APIs.")
+            logger.info("⚠️  No se obtuvieron metadatos oficiales de las APIs.")
 
         # Devolvemos el diccionario final con toda la información recopilada
         return data
+
 
 
     # Método privado para obtener el título alternativo
@@ -399,6 +423,7 @@ class MetadataEngine:
 
         """
         Busca recursivamente el archivo más pesado que sea multimedia dentro de un directorio.
+        Excluye archivos con extensiones ignoradas (temporales de eMule/Torrent).
         """
 
         try:
@@ -406,21 +431,31 @@ class MetadataEngine:
             media_extensions = EXTENSION_MAPPING["video"].union(EXTENSION_MAPPING["audio"])
             
             # Buscamos todos los archivos de forma recursiva
-            files = [f for f in directory.rglob('*') if f.is_file() and f.suffix.lower() in media_extensions]
+            all_files = [f for f in directory.rglob('*') if f.is_file()]
             
-            if not files:
-                # Si no hay archivos multimedia, buscamos cualquier archivo (fallback)
-                files = [f for f in directory.rglob('*') if f.is_file()]
-                
-            if not files:
+            # Filtramos los que sean temporales/ignorados
+            valid_files = []
+            for f in all_files:
+                compound_ext = "".join(f.suffixes).lower()
+                if compound_ext in IGNORED_EXTENSIONS or f.suffix.lower() in IGNORED_EXTENSIONS:
+                    continue
+                valid_files.append(f)
+            
+            if not valid_files:
                 return None
+
+            # 1. Intentamos buscar entre los multimedia
+            media_files = [f for f in valid_files if f.suffix.lower() in media_extensions]
             
-            # Retornamos el de mayor tamaño
-            return max(files, key=lambda f: f.stat().st_size)
+            if media_files:
+                return max(media_files, key=lambda f: f.stat().st_size)
+            
+            # 2. Si no hay multimedia válidos, retornamos el más grande de los válidos (fallback)
+            return max(valid_files, key=lambda f: f.stat().st_size)
 
         except Exception as e:
             logger.warning(f"⚠️  Error al buscar archivo representante en {directory.name}: {e}")
-            return 
+            return None
             
     def _get_plan_b_title(self, title: str) -> Optional[str]:
 
