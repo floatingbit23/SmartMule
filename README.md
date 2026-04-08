@@ -28,9 +28,11 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
 
 *   **Doble Capa de Verificación**: Identifica archivos por su nombre (IA) y por su contenido (Hash ED2K / Fingerprint). 
 
-*   **Antimalware Semántico**: Inspección profunda de archivos comprimidos (`.zip`, `.rar`, `.7z`) sin extracción, usando VirusTotal, para detectar ejecutables ocultos o inconsistencias.
+*   **Soporte de Directorios (Folder Grouping)**: SmartMule detecta si una descarga es una carpeta (ej: película con subtítulos). Identifica el archivo principal para el hashing y los metadatos, pero mueve y renombra **toda la carpeta** como una única unidad funcional.
 
-*   **Desempate Inteligente (Tie-Breaking)**: Usa la duración real de los videos para distinguir entre películas homónimas (ej: Solaris 1972 vs 2002).
+*   **Antimalware Semántico**: Inspección profunda de archivos comprimidos (`.zip`, `.rar`, `.7z`) sin extracción, usando VirusTotal. Implementa un sistema de **Triaje Inteligente** que prioriza detecciones de motores TOP (Microsoft, Kaspersky, ESET, etc.) para una tolerancia cero contra amenazas modernas.
+
+*   **Desempate Inteligente (Tie-Breaking)**: Usa la duración real de los videos para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 
 *   **Triaje Automático**: 
     -   `MALICIOUS`: Borrado automático destructivo.
@@ -118,7 +120,7 @@ Para no perder visibilidad en la red ni dejar de ganar créditos tras la organiz
 
 ## Configuración para Torrents (BitTorrent, uTorrent, qBittorrent)
 
-SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a que las redes Torrent detienen el *seeding* (compartir) si cambias el archivo de sitio, SmartMule usa por defecto la creación de **Hardlinks** para los archivos de estas redes.
+SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a que las redes Torrent detienen el *seeding* (compartir) si cambias el archivo de sitio, SmartMule usa por defecto la creación de **Hardlinks** para los archivos de estas redes, asegurando que puedas seguir compartiendo (_Seeding_) los archivos sin interrupciones.
 
 1.  **Ajustes de Extensiones (Crucial)**: Para prevenir que SmartMule procese archivos sin terminar, es obligatorio que actives la opción de de tu cliente de Torrent para agregar una extensión a las descargas incompletas. (Ej. *`Append .!ut to incomplete files`* en uTorrent o *`Añadir !qB a descargas incompletas`* en qBittorrent).
 

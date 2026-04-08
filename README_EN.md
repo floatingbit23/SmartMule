@@ -27,10 +27,12 @@ By default, eMule places all completed downloads into a single `Incoming` folder
 *   **Active Surveillance (Watchdog)**: Instantly detects new files in your `Incoming` folder.
 
 *   **Dual-Layer Verification**: Identifies files by name (AI) and by content (ED2K Hash / Fingerprint). 
++
++*   **Directory Support (Folder Grouping)**: SmartMule detects if a download is a folder (e.g., a movie with subtitles). It identifies the main file for hashing and metadata but moves and renames the **entire folder** as a single functional unit.
 
-*   **Semantic Antimalware**: Deep inspection of compressed files (`.zip`, `.rar`, `.7z`) without extraction, using VirusTotal to detect hidden executables or semantic inconsistencies.
+*   **Semantic Antimalware**: Deep inspection of compressed files (`.zip`, `.rar`, `.7z`) without extraction, using VirusTotal. Features an **Smart Triage** system that prioritizes detections from TOP engines (Microsoft, Kaspersky, ESET, etc.) for zero-tolerance security against modern threats.
 
-*   **Intelligent Tie-Breaking**: Uses real video duration to distinguish between homonymous movies (e.g., Solaris 1972 vs 2002).
+*   **Intelligent Tie-Breaking**: Uses real video duration to distinguish between homonymous movies (e.g., Solaris 1972 vs Solaris 2002).
 
 *   **Automated Triage**: 
     -   `MALICIOUS`: Automatic destructive deletion.
@@ -118,7 +120,7 @@ To maintain visibility on the network and continue earning credits after organiz
 
 ## Torrent Configuration (BitTorrent, uTorrent, qBittorrent)
 
-SmartMule is fully compatible with Torrent download managers. Because Torrent networks stop *seeding* (sharing) if you change the file's location, SmartMule defaults to creating **Hardlinks** for files coming from these networks.
+SmartMule is fully compatible with Torrent download managers. Because Torrent networks stop *seeding* (sharing) if you change the file's location, SmartMule defaults to creating **Hardlinks** for files coming from these networks, ensuring that you can continue sharing (_Seeding_) the files without interruptions.
 
 1.  **Extensions Settings (Crucial)**: To prevent SmartMule from processing unfinished files, it is mandatory that you enable the option in your Torrent client to add an extension to incomplete downloads. (e.g. *`Append .!ut to incomplete files`* in uTorrent or *`Append .!qB to incomplete files`* in qBittorrent).
 
