@@ -70,14 +70,17 @@ class LibraryOrganizer:
 
                 logger.critical(f"💀 [Organizer] MALWARE CONFIRMADO!!! Borrando: {filename}")
 
-                # Borro el archivo directamente, sin preguntar al usuario
-                os.remove(source_path)
+                # Borro el ítem directamente. shutil.rmtree para carpetas, os.remove para archivos.
+                if source_path.is_dir():
+                    shutil.rmtree(source_path)
+                else:
+                    os.remove(source_path)
                 
                 send_notification("Malware Eliminado 💀", f"Se ha detectado malware encubierto en '{filename}' y ha sido borrado permanentemente por seguridad.", is_critical=True)
 
-                logger.critical(f"🗑️ [Organizer] Archivo {filename} eliminado permanentemente del sistema por su seguridad.")
+                logger.critical(f"🗑️ [Organizer] Ítem {filename} eliminado permanentemente del sistema por su seguridad.")
                 
-                return "<DELETED_MALICIOUS>" # Retorno String especial para que el main sepa que el archivo fue eliminado
+                return "<DELETED_MALICIOUS>"
 
             # 2. EVALUACIÓN DE RIESGO MEDIO (SUSPICIOUS)
             if "SUSPICIOUS" in verdict:
@@ -105,12 +108,18 @@ class LibraryOrganizer:
                 "image": "Images",
                 "games": "Games",
                 "documents": "Documents",
-                "subtitles": "Subtitles",
+                "subtitles": "Movies_and_Series/Subtitles",
                 "info": "Info_and_Verification",
                 "unknown": "Others"
             }
 
-            folder_name = category_mapping.get(media_type, "Others") # Obtengo el nombre de la carpeta
+            # Si es vídeo genérico pero tiene año, asumimos que es una película/serie para que no vaya a Video_Clips
+            if media_type == "video" and metadata.get("year"):
+                current_media_type = "movie"
+            else:
+                current_media_type = media_type
+
+            folder_name = category_mapping.get(current_media_type, "Others") # Obtengo el nombre de la carpeta
             dest_dir = self.library_dir / folder_name # Ruta de la carpeta
             dest_dir.mkdir(parents=True, exist_ok=True) # Creo la carpeta si no existe
 
@@ -139,20 +148,23 @@ class LibraryOrganizer:
             # 3. Saneamos el nombre (eliminamos carácteres prohibidos por el OS: : / \ * ? " < > |)
             clean_filename = re.sub(r'[\\/:*?"<>|]', '', pretty_name).strip()
             
-            # 4. Restauramos la extensión original
-            final_filename = f"{clean_filename}{source_path.suffix}"
+            # 4. Restauramos la extensión original (solo si es un archivo)
+            suffix = source_path.suffix if source_path.is_file() else ""
+            
+            final_filename = f"{clean_filename}{suffix}"
 
             # Construimos la ruta final
             dest_path = dest_dir / final_filename
 
-            # Si el archivo ya existe en destino, le añadimos un sufijo para no sobreescribir
+            # Si el ítem ya existe en destino, le añadimos un sufijo para no sobreescribir
             counter = 1
 
             while dest_path.exists():
-                dest_path = dest_dir / f"{clean_filename}_{counter}{source_path.suffix}"
+                dest_path = dest_dir / f"{clean_filename}_{counter}{suffix}"
                 counter += 1
 
             # Ejemplo: "The.Matrix.1999.mp4" -> "The.Matrix.1999_1.mp4"
+            # Ejemplo Carpeta: "Peli_2024" -> "Peli_2024_1"
 
             # 5. Realizamos el movimiento/renombrado físico
             shutil.move(str(source_path), str(dest_path))

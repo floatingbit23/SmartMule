@@ -24,6 +24,7 @@ import hashlib
 import logging
 import time
 import threading
+from typing import Optional
 from pathlib import Path
 
 from Crypto.Hash import MD4  # pycryptodome: implementación del algoritmo MD4
@@ -34,22 +35,33 @@ from smartmule.config import ED2K_CHUNK_SIZE # 9,728,000 bytes (9.28 MB)
 logger = logging.getLogger("SmartMule.hasher")
 
 # Función que calcula el hash ED2K de un archivo
-def calculate_ed2k(file_path: Path) -> str:
+def calculate_ed2k(path: Path) -> str:
 
     """
-    Calculo el hash ED2K de un archivo leyéndolo por búferes de ED2K_CHUNK_SIZE bytes.
-    Durante el cálculo, inicio un timer que loguea el tiempo transcurrido cada 2 segundos.
+    Calculo el hash ED2K de un ítem (archivo o carpeta).
+    
+    - Si es archivo: lectura por búferes de ED2K_CHUNK_SIZE bytes.
+    - Si es carpeta: busco el archivo más grande en su interior (el 'main file') y lo hasheo.
 
     Args:
-        file_path: Ruta al archivo cuyo hash quiero calcular.
+        path: Ruta al archivo o carpeta cuyo hash quiero calcular.
 
     Returns:
         Hash ED2K como string hexadecimal de 32 caracteres (128 bits).
-
-    Raises:
-        FileNotFoundError: Si el archivo no existe.
-        OSError: Si no puedo leer el archivo.
     """
+
+    # Si es una carpeta, delegamos en el archivo más grande que contenga
+    if path.is_dir():
+
+        main_file = get_main_file_in_dir(path)
+        
+        if not main_file:
+            return MD4.new(b"").hexdigest().upper() # Carpeta vacía o sin archivos legibles
+        logger.info(f"📁  Directorio detectado. Usando archivo principal {main_file.name} para cálculo de hash ED2K...")
+        file_to_hash = main_file
+
+    else:
+        file_to_hash = path # Si no es una carpeta, es un archivo
 
     # Inicio el timer de progreso que informará cada 2s si el cálculo tarda
     start_time = time.time()
@@ -96,7 +108,7 @@ def calculate_ed2k(file_path: Path) -> str:
 
         chunk_hashes: list[bytes] = [] # Lista para guardar los hashes de cada bloque
 
-        with open(file_path, "rb") as f: # Abro el archivo en modo lectura binaria
+        with open(file_to_hash, "rb") as f: # Abro el archivo en modo lectura binaria
 
             while True: # Bucle infinito
 
@@ -163,7 +175,7 @@ def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:
     return f"ed2k://|file|{file_path.name}|{file_size}|{hash_hex}|/"
 
 # Función que calcula la huella digital del archivo
-def calculate_fingerprint(file_path: Path, file_size: int) -> str:
+def calculate_fingerprint(path: Path, file_size: int) -> str:
 
     """
     Calcula una 'huella digital' (fingerprint) rápida del archivo:
@@ -173,23 +185,37 @@ def calculate_fingerprint(file_path: Path, file_size: int) -> str:
     Esta huella se utiliza para identificar el archivo en la BBDD de forma instantánea,
     sin necesidad de calcular el hash ED2K completo (que requiere leer todo el archivo).
 
+    Si es carpeta, utiliza el archivo más grande para generar la huella.
+
     Args:
-        file_path: Ruta al archivo
+        path: Ruta al archivo o carpeta
         file_size: Tamaño en bytes
 
     Returns:
         String hexadecimal con el hash SHA256 de la huella (en MAYÚSCULAS)
     """
 
+    # Si es una carpeta, buscamos el archivo más pesado para que sea el representante.
+    if path.is_dir():
+        main_file = get_main_file_in_dir(path)
+        if not main_file:
+            return ""
+        target_path = main_file
+        # El tamaño para la lógica de huella debe ser el del archivo real, no el total de la carpeta
+        target_size = main_file.stat().st_size
+    else:
+        target_path = path
+        target_size = file_size
+
     sha = hashlib.sha256() # Creo el objeto SHA256
     buffer_size = 256 * 1024  # 256 KB (tamaño del buffer)
 
     try:
 
-        with open(file_path, "rb") as f: # Abro el archivo en modo lectura binaria
+        with open(target_path, "rb") as f: # Abro el archivo en modo lectura binaria
 
-            if file_size < buffer_size * 2: # Si el archivo es menor de 512 KB
-                sha.update(f.read()) # Leo y hasheo el contenido completo
+            if target_size < buffer_size * 2: # Si el archivo es menor de 512 KB
+                sha.update(f.read()) # Leo y hashea el contenido completo
 
             else: # Si el archivo es mayor o igual a 512 KB
                 
@@ -201,5 +227,26 @@ def calculate_fingerprint(file_path: Path, file_size: int) -> str:
         return sha.hexdigest().upper() # Devuelvo el hash en formato hexadecimal y en mayúsculas
 
     except (OSError, IOError) as e:
-        logger.error(f"❌ Error al calcular fingerprint de {file_path.name}: {e}")
+        logger.error(f"❌ Error al calcular fingerprint de {path.name}: {e}")
         return "" 
+
+
+def get_main_file_in_dir(dir_path: Path) -> Optional[Path]:
+
+    """
+    Busca el archivo más grande dentro de un directorio (recursivo).
+    Esto nos permite identificar el vídeo principal en una carpeta de Release.
+    """
+
+    try:
+        files = [f for f in dir_path.rglob('*') if f.is_file()]
+
+        if not files:
+            return None
+
+        # Retornamos el de mayor tamaño
+        return max(files, key=lambda f: f.stat().st_size)
+
+    except Exception as e:
+        logger.warning(f"⚠️  No se pudo determinar el archivo principal en {dir_path.name}: {e}")
+        return None

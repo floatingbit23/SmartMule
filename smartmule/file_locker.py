@@ -25,52 +25,67 @@ logger = logging.getLogger("SmartMule.file_locker")
 
 
 # Método para verificar si el archivo está bloqueado
-def is_file_locked(file_path: Path) -> bool:
+def is_file_locked(path: Path) -> bool:
 
     """
-    Compruebo si un archivo está bloqueado por otro proceso intentando abrirlo en modo lectura binaria (rb). 
-    Es una verificación puntual (no espera).
-
-    Abro y cierro inmediatamente — solo me interesa saber si Windows me deja acceder al archivo o no. 
-    Si obtengo PermissionError, significa que otro proceso (probablemente eMule) lo tiene abierto con un bloqueo exclusivo.
+    Compruebo si un ítem (archivo o carpeta) está bloqueado por otro proceso.
+    
+    - Si es un archivo: Intento abrirlo en modo lectura binaria (rb).
+    - Si es una carpeta: Verifico recursivamente si alguno de los archivos que contiene está bloqueado.
 
     Args:
-        file_path: Ruta completa al archivo que quiero verificar.
+        path: Ruta completa al ítem que quiero verificar.
 
     Returns:
-        True -> si el archivo está bloqueado
-        False -> si el archivo está libre.
+        True -> si el ítem (o algo dentro de él) está bloqueado.
+        False -> si todo está libre.
     """
 
+    if path.is_dir():
+        # Para carpetas, comprobamos todos los archivos internos (recursivo).
+        # Si un solo archivo de la carpeta está bloqueado, la carpeta entera se considera bloqueada.
+        try:
+            for item in path.rglob('*'):
+                if item.is_file() and _is_single_file_locked(item):
+                    return True
+            return False
+        except OSError as e:
+            logger.warning(f"⚠️  Error detectando archivos en carpeta '{path.name}': {e}")
+            return True
+    else:
+        return _is_single_file_locked(path)
+
+
+def _is_single_file_locked(file_path: Path) -> bool:
+
+    """Implementación interna para un solo archivo físico."""
+    
     try:
         # Intento abrir el archivo en modo lectura binaria. 
         # Si otro proceso lo tiene bloqueado, Windows lanzará PermissionError.
         with open(file_path, "rb") as f:
             pass
-
-        return False # Si abre, el archivo está libre y se devuelve False
+        return False
 
     except PermissionError:
         # El archivo está bloqueado por otro proceso (Sharing Violation).
         return True
 
-    except OSError as e:
-        # Otro tipo de error del sistema operativo (archivo no encontrado...)
-        # Lo trato como "bloqueado" por precaución
-        logger.warning(f"⚠️  Error de OS al verificar bloqueo de '{file_path.name}': {e}")
+    except OSError:
+        # Errores de red o de sistema se tratan como bloqueado por precaución.
         return True
 
 
 # Método para esperar a que el archivo se desbloquee
 def wait_for_unlock(
-    file_path: Path,
+    path: Path,
     timeout: int = FILE_LOCK_TIMEOUT,
     initial_delay: float = FILE_LOCK_INITIAL_DELAY,
     max_delay: float = FILE_LOCK_MAX_DELAY,
 ) -> bool:
 
     """
-    Espero a que un archivo sea accesible, usando reintentos con backoff exponencial.
+    Espero a que un ítem (archivo o carpeta) sea accesible, usando reintentos con backoff exponencial.
 
     Proceso:
     1. Intento abrir el archivo en modo lectura binaria (rb).
@@ -82,7 +97,7 @@ def wait_for_unlock(
     El backoff exponencial (1s, 2s, 4s, 8s, 16s...) es crucial para no saturar el disco con operaciones open() constantes.
 
     Args:
-        file_path:     Ruta al archivo que espero que se desbloquee.
+        path:     Ruta al archivo o carpeta que espero que se desbloquee.
         timeout:       Tiempo máximo total de espera en segundos (default: 120).
         initial_delay: Espera inicial entre reintentos en segundos (default: 1.0).
         max_delay:     Espera máxima entre reintentos en segundos (default: 15.0).
@@ -90,92 +105,65 @@ def wait_for_unlock(
     Returns:
         True -> si el archivo se desbloqueó dentro del timeout.
         False -> si se agotó el tiempo (timeout) o el archivo ya no existe.
+
+    Si es una carpeta, se considera desbloqueada cuando TODOS sus archivos internos son accesibles.
     """
 
     # Registro el momento de inicio para controlar el timeout total.
     start_time = time.monotonic()
-
-    # El delay actual comienza en initial_delay y se duplica en cada intento.
-    current_delay = initial_delay # 1.0s
-
-    # Llevo la cuenta de intentos para el logging.
+    current_delay = initial_delay
     attempt = 0
 
-    while True:
+    # Determinamos el tipo de ítem (Item Type) para los logs
+    item_type = "Carpeta" if path.is_dir() else "Archivo"
 
+    while True:
         attempt += 1
 
-        # Primero verifico que el archivo siga existiendo
-        if not file_path.exists():
+        # Primero verifico que el ítem siga existiendo
+        if not path.exists():
             logger.warning(
-                f"⚠️  El archivo '{file_path.name}' desapareció durante la espera de desbloqueo (intento #{attempt}). Cancelando..."
+                f"⚠️  {item_type} '{path.name}' desapareció durante la espera (intento #{attempt})."
             )
             return False
 
-        try:
-
-            # Intento abrir el archivo en modo lectura binaria. Si eMule ya lo liberó, esto funcionará sin problemas.
-            with open(file_path, "rb") as f:
-                pass
-
-            # ¡Éxito! El archivo está desbloqueado y listo para procesar.
-            if attempt > 1:
-
-                elapsed = time.monotonic() - start_time # Tiempo total transcurrido desde el primer intento
+        # Verificamos si está bloqueado usando la lógica inteligente que distingue entre archivo/carpeta
+        if not is_file_locked(path):
+            # ¡Éxito!
+            
+            if attempt > 1: # Si ha habido reintentos, informo del tiempo total transcurrido
+                elapsed = time.monotonic() - start_time
 
                 logger.info(
-                    f"✅ Archivo '{file_path.name}' desbloqueado tras {attempt} intento(s) ({elapsed:.1f}s)"
+                    f"✅ {item_type} '{path.name}' desbloqueado tras {attempt} intento(s) ({elapsed:.1f}s)"
                 )
-            else:
-                logger.debug(
-                    f"✅ Archivo '{file_path.name}' accesible inmediatamente"
-                )
+            
+            else: # Si no ha habido reintentos, informo de que el archivo está accesible inmediatamente
+                logger.debug(f"✅ {item_type} '{path.name}' accesible inmediatamente!")
             return True
 
-        except PermissionError:
-
-            # El archivo sigue bloqueado. Calculo cuánto tiempo ha pasado.
-            elapsed = time.monotonic() - start_time
+        # Sigue bloqueado...
+        elapsed = time.monotonic() - start_time
 
             # Verifico si he agotado el tiempo máximo de espera.
-            if elapsed + current_delay >= timeout:
-                logger.error(
-                    f"❌  TIMEOUT: No pude acceder a '{file_path.name}' tras {timeout}s ({attempt} intentos)."
-                    f"ℹ️  Posiblemente eMule siga usando el archivo."
-                )
-                return False
-
-            # Informo del reintento. 
-            # Uso DEBUG para los primeros intentos y WARNING si ya llevo más de 5, porque algo raro puede estar pasando
-            log_level = logging.WARNING if attempt > 5 else logging.DEBUG
-
-            logger.log(
-                log_level,
-                f"⚠️  Archivo '{file_path.name}' bloqueado (intento #{attempt}). "
-                f"ℹ️  Reintentando en {current_delay:.1f}s..."
+        if elapsed + current_delay >= timeout:
+            logger.error(
+                f"❌  TIMEOUT: No pude acceder a {item_type.lower()} '{path.name}' tras {timeout}s ({attempt} intentos)."
             )
+            return False
+
+        # Informo del reintento.
+        # Uso DEBUG para los primeros intentos y WARNING si ya llevo más de 5, porque algo raro puede estar pasando
+        log_level = logging.WARNING if attempt > 5 else logging.DEBUG
+
+        logger.log(
+            log_level,
+            f"⚠️  {item_type} '{path.name}' bloqueado (intento #{attempt}). "
+            f"ℹ️  Reintentando en {current_delay:.1f}s..."
+        )
 
             # Espero antes del siguiente intento.
-            time.sleep(current_delay)
+        time.sleep(current_delay)
 
             # Actualizo el backoff exponencial
-            current_delay = min(current_delay * 2, max_delay)
-
-        except OSError as e:
-
-            # Error inesperado del SO. Lo registro y sigo intentando, ya que podría ser un error transitorio.
-            logger.warning(
-                f"⚠️  Error de OS al intentar acceder a '{file_path.name}' en el intento #{attempt}: {e}"
-            )
-
-            elapsed = time.monotonic() - start_time
-
-            if elapsed >= timeout:
-                logger.error(
-                    f"❌  TIMEOUT con errores: No pude acceder a '{file_path.name}' tras {timeout}s." 
-                    f"Último error: {e}"
-                )
-                return False
-
-            time.sleep(current_delay) # Espero antes del siguiente intento.
-            current_delay = min(current_delay * 2, max_delay) # Actualizo el backoff exponencial
+        current_delay = min(current_delay * 2, max_delay)

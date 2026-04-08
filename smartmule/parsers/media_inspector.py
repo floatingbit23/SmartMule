@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict
+from smartmule.hasher import get_main_file_in_dir
 
 """
 El objetivo de este módulo es solucionar el problema de los archivos homónimos.
@@ -36,6 +37,19 @@ def inspect_media_file(filepath: str) -> Dict:
     if not path.exists():
         return result
 
+    # Si es una carpeta, delegamos en el archivo más grande que contenga
+    if path.is_dir():
+        main_file = get_main_file_in_dir(path)
+
+        if not main_file:
+            return result
+
+        target_path = main_file
+        
+    # Si no es una carpeta, es un archivo
+    else: 
+        target_path = path
+
     try:
 
         # Comando de ffprobe para obtener duración y resolución en formato JSON
@@ -45,7 +59,7 @@ def inspect_media_file(filepath: str) -> Dict:
             "-v", "error",
             "-show_entries", "format=duration:stream=width,height", # Muestra duración y resolución
             "-of", "json", # Formato de salida JSON
-            filepath # Archivo a analizar
+            str(target_path) # Archivo a analizar
         ]
         
         output = subprocess.check_output(cmd, stderr=subprocess.STDOUT) # Ejecuta el comando y captura la salida
@@ -71,6 +85,6 @@ def inspect_media_file(filepath: str) -> Dict:
         logger.debug(f"🔍 [Inspector] Duración detectada: {duration_min} min ({filepath})") # Muestra la duración
 
     except Exception as e:
-        logger.warning(f"⚠️ [Inspector] No se pudo leer metadatos de {path.name}: {e}")
+        logger.warning(f"⚠️  [Inspector] No se pudieron leer los metadatos de {path.name}: {e}")
 
     return result

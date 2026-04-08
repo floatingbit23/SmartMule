@@ -151,8 +151,11 @@ class QueueManager:
             self._active_paths.add(abs_path)
 
         try:
-            # Obtengo el tamaño del archivo para calcular la prioridad.
-            file_size = file_path.stat().st_size
+            # Obtengo el tamaño. Si es carpeta, sumo el tamaño de todo el contenido.
+            if file_path.is_dir():
+                file_size = sum(f.stat().st_size for f in file_path.rglob('*') if f.is_file())
+            else:
+                file_size = file_path.stat().st_size
 
         except OSError as e:
             # Si no puedo obtener el tamaño (por lo que sea), lo registro y aborto. 
@@ -369,7 +372,7 @@ class QueueManager:
                     return 
 
             else:
-                logger.info(f"ℹ️  El archivo Fingerprint {fingerprint[:8]} ya existe, pero faltan metadatos o no fue organizado. Forzando re-análisis completo...")
+                logger.info(f"ℹ️  El archivo con fingerprint [{fingerprint[:8]}] ya existe, pero faltan metadatos o no fue organizado. Forzando re-análisis completo...")
                 # Continuamos a la Fase 2 sin optimización (re-proceso total).
 
 

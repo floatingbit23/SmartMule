@@ -120,14 +120,11 @@ class IncomingHandler(FileSystemEventHandler):
         Args:
             event: Evento de movimiento con src_path (origen) y dest_path (destino).
         """
-        if event.is_directory:
-            return
-
-        # En un evento de movimiento, me interesa la ruta de DESTINO
-        # porque es la que contiene el archivo final.
-        dest_path = Path(event.dest_path)
-        logger.debug(f"Archivo movido/renombrado a: {dest_path.name}")
-        self._reset_timer(dest_path)
+        # Identificamos el ítem de nivel superior en Incoming
+        top_level_item = self._get_top_level_item(dest_path)
+        if top_level_item:
+            logger.debug(f"Ítem movido/renombrado en Incoming: {top_level_item.name}")
+            self._reset_timer(top_level_item)
 
 
     # Método para manejar eventos (creación y modificación)
@@ -139,8 +136,11 @@ class IncomingHandler(FileSystemEventHandler):
         Args:
             event: El evento del sistema de archivos.
         """
-        # Ignoro eventos de directorios. Solo me interesan archivos.
-        if event.is_directory:
+        src_path = Path(event.src_path)
+        # Identificamos el ítem de nivel superior (la carpeta o el archivo en la raíz de Incoming)
+        top_level_item = self._get_top_level_item(src_path)
+        
+        if not top_level_item:
             return
 
         file_path = Path(event.src_path)
@@ -153,13 +153,32 @@ class IncomingHandler(FileSystemEventHandler):
 
         logger.debug(f"Evento '{event.event_type}' para: {file_path.name}")
 
-        # Reinicio el timer de debounce. Si ya había un timer para este archivo,
+        # Reinicio el timer de debounce. Si ya había un timer para este ítem,
         # se cancela y se crea uno nuevo. Esto agrupa los eventos duplicados.
-        self._reset_timer(file_path)
+        self._reset_timer(top_level_item)
+
+    def _get_top_level_item(self, path: Path) -> Optional[Path]:
+
+        """
+        Determina cuál es el ítem raíz dentro de la carpeta Incoming.
+        Incoming/Peli/Sub/file.mp4 -> Incoming/Peli
+        """
+
+        try:
+            incoming_abs = INCOMING_PATH.resolve()
+            path_abs = path.resolve()
+            relative = path_abs.relative_to(incoming_abs)
+            top_name = relative.parts[0]
+            
+            return INCOMING_PATH / top_name
+
+        except (ValueError, IndexError):
+            return None
 
 
     # Método para ignorar archivos
     def _should_ignore(self, file_path: Path) -> bool:
+
         """
         Decido si debo ignorar un archivo basándome en su extensión.
 
@@ -176,6 +195,7 @@ class IncomingHandler(FileSystemEventHandler):
         Returns:
             True si debo ignorar el archivo.
         """
+
         # Compruebo extensiones compuestas concatenando los sufijos.
         # Para "file.part.met.bak": suffixes = ['.part', '.met', '.bak']
         # Concateno para obtener ".part.met.bak" y verifico si está en IGNORED.
@@ -232,6 +252,7 @@ class IncomingHandler(FileSystemEventHandler):
 
     # Método para despachar (enviar a la cola) archivos
     def _dispatch_file(self, file_path: Path) -> None:
+
         """
         Despacho un archivo tras completar el periodo de debounce.
 
@@ -246,6 +267,7 @@ class IncomingHandler(FileSystemEventHandler):
         Args:
             file_path: Ruta del archivo a despachar.
         """
+
         # Limpio el timer del diccionario porque ya se ejecutó.
         key = str(file_path.resolve())
         with self._lock:
@@ -266,8 +288,8 @@ class IncomingHandler(FileSystemEventHandler):
         # wait_for_unlock() implementa el retry con backoff exponencial.
         if not wait_for_unlock(file_path):
             logger.error(
-                f"No pude acceder a '{file_path.name}'. "
-                f"Saltando este archivo."
+                f"❌    No pude acceder a '{file_path.name}'. "
+                f"Saltando este archivo..."
             )
             return
 
@@ -321,12 +343,11 @@ class SmartMuleWatcher:
         # Este es el componente que realmente se comunica con la API ReadDirectoryChangesW de Windows.
         self._observer = Observer() # Instancio el Observer
 
-        # Registro la carpeta Incoming para monitorización.
-        # recursive=False porque Incoming es una carpeta plana (sin subcarpetas).
+        # Registro la carpeta Incoming para monitorización recursiva.
         self._observer.schedule(
             self._handler,
             str(INCOMING_PATH),
-            recursive=False,
+            recursive=True,
         )
 
         # Guardo referencia al QueueManager para el scan inicial.
@@ -379,11 +400,7 @@ class SmartMuleWatcher:
 
         for item in INCOMING_PATH.iterdir(): # Recorro todos los elementos en la carpeta Incoming
 
-            # Solo me interesan archivos, no directorios
-            if not item.is_file():
-                continue
-
-            # Aplico el mismo filtro de extensiones que el Handler
+            # Procesamos tanto archivos como carpetas que estén en la raíz de Incoming
             if self._handler._should_ignore(item):
                 continue
 

@@ -16,12 +16,12 @@ EXTENSION_MAPPING = {
     "info": {".nfo", ".sfv", ".md5", ".sha1"} # Información y Verificación de la Escena
 }
 
-# Etiquetas de P2P comunes a eliminar (Códecs, Calidades...)
+# Etiquetas de P2P comunes a eliminar (Códecs, Calidades, Release Groups (ripeos), ...)
 SCENE_TAGS = [
     r"hdrip", r"web-dl", r"x264", r"x265", r"hevc", r"aac", r"ac3", r"e-ac3",
     r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
-    r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
-    r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip",
+    r"yify", r"rarbg", r"xrg", r"vpp", r"ion10", r"psa", r"qxr", r"sparks", 
+    r"geckos", r"drones", r"amiable", r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip",
     # Audio Tags
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
     # Additional Technical Tags

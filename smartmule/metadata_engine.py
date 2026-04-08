@@ -1,13 +1,16 @@
 import logging
+import re
+import unicodedata
+from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any, Optional
 
-from smartmule.parsers.regex_parser import parse_filename
+from smartmule.parsers.regex_parser import parse_filename, EXTENSION_MAPPING
 from smartmule.parsers.llm_parser import parse_with_llm
 from smartmule.api.tmdb_client import TMDBClient
 from smartmule.api.openlibrary_client import OpenLibraryClient
 from smartmule.api.musicbrainz_client import MusicBrainzClient
 from smartmule.api.virustotal_client import VirusTotalClient
-import re # regex
 
 logger = logging.getLogger("SmartMule.engine")
 
@@ -29,15 +32,45 @@ class MetadataEngine:
         self.virustotal = VirusTotalClient() # Instancio la clase VirusTotalClient
 
 
-    # Método para identificar el archivo
+    # Método para identificar el archivo o carpeta
     def identify_file(self, filename: str, filepath: str = None) -> dict:
+        """
+        Orquestación de la identificación: Regex -> Análisis IA -> API.
+        Ahora soporta carpetas buscando un archivo representante.
+        """
+
+        item_path = Path(filepath) if filepath else Path(filename)
+        is_directory = item_path.is_dir()
+        
+        # Guardamos el nombre original para logs
+        display_name = filename
+
+        # Si es un directorio, buscamos el archivo "base" (el más grande que sea video/audio)
+        if is_directory:
+            
+            logger.info(f"📂 [Engine] Procesando directorio: {display_name}")
+            representative = self._find_representative_file(item_path)
+            
+            # Definimos el objetivo para escaneos técnicos (VT, MediaInspector, etc.)
+            if representative:
+                technical_target = str(representative)
+                logger.info(f"🔍 [Engine] Archivo representante encontrado: {representative.name}")
+
+                # Si el nombre del archivo representante es muy genérico, preferimos usar el nombre de la carpeta
+                if len(representative.stem) < 5 or representative.stem.lower() in ["movie", "video", "cd1", "cd2"]:
+                    logger.info(f"ℹ️  [Engine] Usando nombre de carpeta para identificar (nombre de archivo genérico)")
+                else:
+                    filename = representative.name
+            else:
+                technical_target = filepath
+                logger.warning(f"⚠️  [Engine] No se encontró un archivo multimedia claro en la carpeta {display_name}")
+        else:
+            technical_target = filepath
 
         logger.info(f"🔍  Identificando archivo [{filename}]...")
         
-
         # ================= CAPA 1: Regex Simple =================
-
-
+        
         data = parse_filename(filename)
         
 
@@ -76,12 +109,12 @@ class MetadataEngine:
         # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
         
 
-        if media_type == "compressed" and filepath: # Si el archivo es un comprimido y tenemos la ruta
+        if media_type == "compressed" and technical_target: # Si el archivo es un comprimido y tenemos la ruta
 
             from smartmule.parsers.archive_inspector import inspect_archive
                 
             logger.info(f"🗜️  Archivo comprimido detectado. Iniciando análisis...")
-            inspection = inspect_archive(filepath, expected_type=media_type)
+            inspection = inspect_archive(technical_target, expected_type=media_type)
             
             # Si el interior revela un FAKE/MALICIOUS o está encriptado (protegido con contraseña), anulamos todo el proceso.
             if inspection["status"] in ["MALICIOUS", "SUSPICIOUS"]:
@@ -125,7 +158,7 @@ class MetadataEngine:
             # Obtenemos duración real del archivo para desempate si hay homónimos
             from smartmule.parsers.media_inspector import inspect_media_file
 
-            tech_info = inspect_media_file(filepath) # Información técnica del archivo
+            tech_info = inspect_media_file(technical_target) # Información técnica del archivo
             actual_duration_min = tech_info.get("duration_sec", 0) // 60 # Duración en minutos
 
             # TMDB diferencia Películas de Series
@@ -214,8 +247,6 @@ class MetadataEngine:
 
             # Si se encontró resultado
             if api_result:
-                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos) ---
-                from difflib import SequenceMatcher
                 similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
                 
                 if similitud < 0.7:
@@ -245,10 +276,7 @@ class MetadataEngine:
             
             if api_result:
                 # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos Avanzado) ---
-                from difflib import SequenceMatcher
-                import unicodedata 
-                import re
-
+                
                 def normalizar_comparacion(s):
                     # 1. Normalizamos (NFD) para tildes
                     # 2. Pasamos a minusculas
@@ -293,10 +321,10 @@ class MetadataEngine:
 
             logger.info("💾 [Engine] Software/Archivo comprimido detectado. Iniciando triaje de seguridad con VirusTotal...")
 
-            if filepath:
+            if technical_target:
 
                 # Hacemos el triaje SHA-256 del software
-                vt_result = self.virustotal.scan_software(filepath)
+                vt_result = self.virustotal.scan_software(technical_target)
 
                 # Si se encontró resultado
                 if vt_result:
@@ -367,6 +395,33 @@ class MetadataEngine:
 
 
     # Método privado para obtener el título alternativo
+    def _find_representative_file(self, directory: Path) -> Optional[Path]:
+
+        """
+        Busca recursivamente el archivo más pesado que sea multimedia dentro de un directorio.
+        """
+
+        try:
+            # Obtenemos todas las extensiones que consideramos "multimedia"
+            media_extensions = EXTENSION_MAPPING["video"].union(EXTENSION_MAPPING["audio"])
+            
+            # Buscamos todos los archivos de forma recursiva
+            files = [f for f in directory.rglob('*') if f.is_file() and f.suffix.lower() in media_extensions]
+            
+            if not files:
+                # Si no hay archivos multimedia, buscamos cualquier archivo (fallback)
+                files = [f for f in directory.rglob('*') if f.is_file()]
+                
+            if not files:
+                return None
+            
+            # Retornamos el de mayor tamaño
+            return max(files, key=lambda f: f.stat().st_size)
+
+        except Exception as e:
+            logger.warning(f"⚠️  Error al buscar archivo representante en {directory.name}: {e}")
+            return 
+            
     def _get_plan_b_title(self, title: str) -> Optional[str]:
 
         """

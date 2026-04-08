@@ -10,7 +10,7 @@
 
 ![Terminal](/images/terminal.png)
 
-![pop_up](/images/pop_up.png)
+![alt text](images/pop_up.png)
 
 ---
 
