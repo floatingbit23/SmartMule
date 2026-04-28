@@ -228,7 +228,8 @@ class HashDatabase:
         """
 
         # Uso ISO 8601 con la zona horaria local del usuario para el timestamp.
-        processed_at = datetime.now().astimezone().isoformat()
+        # Formato legible: Ejemplo -> 2026-04-28 23:30:26
+        processed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Consulta SQL que inserta o reemplaza un registro en la tabla 'files'
         self._conn.execute(
@@ -444,7 +445,8 @@ class HashDatabase:
             INSERT OR REPLACE INTO metadata_cache (ed2k_hash, metadata, cached_at)
             VALUES (?, ?, ?)
         """
-        now_str = datetime.now(timezone.utc).isoformat()
+        # Formato legible: Ejemplo -> 2026-04-28 23:30:26
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             metadata_json = json.dumps(metadata_dict)
             self._conn.execute(sql, (ed2k_hash, metadata_json, now_str))

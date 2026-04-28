@@ -40,7 +40,7 @@ SCENE_TAGS = [
     # Audio Tags
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
     # Additional Technical Tags
-    r"h264", r"5\s*1", r"7\s*1", r"dts", r"10bit", r"multi"
+    r"h\s*264", r"h\s*265", r"5\s*1", r"7\s*1", r"dts", r"10\s*bit", r"multi", r"hd\s*ts", r"hd\s*-\s*ts", r"ts\s*hq", r"runneo"
 ]
 
 # hdrip = High Definition Rip
@@ -66,7 +66,7 @@ SCENE_TAGS = [
 # bdrip = Blu-ray Disc Rip
 
 # Etiquetas de calidad de video
-QUALITY_TAGS = [r"4k", r"2160p", r"1080p", r"720p", r"480p", r"1080i", r"uhd"]
+QUALITY_TAGS = [r"4\s*k", r"2160\s*p", r"1080\s*p", r"720\s*p", r"480\s*p", r"1080\s*i", r"uhd"]
 
 def fix_mojibake(text: str) -> str:
     """Intenta reparar errores de codificación comunes (Mojibake)."""
@@ -137,6 +137,12 @@ def parse_filename(filename: str) -> dict:
     # Sustitución de separadores comunes por espacios.
     clean_name = re.sub(r'[\._]', ' ', base_name)
     
+    # === NORMALIZACIÓN INICIAL ===
+    # Separar números de letras (ej: h265Español -> h265 Español)
+    # Esto es CRÍTICO para que las regex posteriores (\b) funcionen con tags pegados.
+    clean_name = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', clean_name)
+    clean_name = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', clean_name)
+    
     # Extraer año (Buscamos 19xx o 20xx)
     year_match = re.search(r'\b(19\d{2}|20\d{2})\b', clean_name)
 
@@ -147,10 +153,10 @@ def parse_filename(filename: str) -> dict:
         
 
     # Extraer temporada y episodio. Patrones como S01E03, 1x03, Season 1 Episode 3... 
-    s_e_match = re.search(r's(\d{1,2})e(\d{1,2})', clean_name, re.IGNORECASE)
+    s_e_match = re.search(r's\s*(\d{1,2})\s*e\s*(\d{1,2})', clean_name, re.IGNORECASE)
 
     if not s_e_match:
-        s_e_match = re.search(r'(?i)\b(\d{1,2})x(\d{1,2})\b', clean_name)
+        s_e_match = re.search(r'(?i)\b(\d{1,2})\s*x\s*(\d{1,2})\b', clean_name)
     
     if s_e_match:
         result["season"] = int(s_e_match.group(1))
@@ -161,7 +167,8 @@ def parse_filename(filename: str) -> dict:
     for q_tag in QUALITY_TAGS:
         q_match = re.search(r'\b' + q_tag + r'\b', clean_name, re.IGNORECASE)
         if q_match:
-            result["quality"] = q_match.group(0).lower()
+            # Normalizamos quitando espacios para que sea '1080p' en lugar de '1080 p'
+            result["quality"] = q_match.group(0).lower().replace(" ", "")
             clean_name = clean_name.replace(q_match.group(0), " ")
             break
             
@@ -174,11 +181,12 @@ def parse_filename(filename: str) -> dict:
     clean_name = re.sub(r'-\s*[a-zA-Z0-9]+$', '', clean_name)
     
     # Extraer resoluciones ANTES de borrarlas (ej: 1920x1080)
-    res_matches = re.findall(r'(?i)\b\d{3,4}x\d{3,4}\b', clean_name)
+    res_matches = re.findall(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', clean_name)
     if res_matches:
-        # Usamos set() para evitar duplicados
-        result["resolution"] = ", ".join(sorted(list(set(res_matches)))).lower()
-    clean_name = re.sub(r'(?i)\b\d{3,4}x\d{3,4}\b', ' ', clean_name)
+        # Usamos set() para evitar duplicados y normalizamos quitando espacios (ej: 1920 x 1080 -> 1920x1080)
+        res_clean = [r.lower().replace(" ", "") for r in res_matches]
+        result["resolution"] = ", ".join(sorted(list(set(res_clean))))
+    clean_name = re.sub(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', ' ', clean_name)
 
     # === EXTRACCIÓN Y NORMALIZACIÓN DE IDIOMAS ===
     
@@ -250,7 +258,7 @@ def parse_filename(filename: str) -> dict:
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
     # Quitar palabras técnicas y extensiones falsas (Lista extendida y más agresiva)
-    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv)\b', ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv|hdts|runneo)\b', ' ', clean_name)
     
     # Quitar códecs con puntos o espacios (ej: H.264, DD5.1, DD5 1)
     clean_name = re.sub(r'(?i)\b(h[\.\s]?264|x[\.\s]?264|h[\.\s]?265|x[\.\s]?265|dd[\.\s]?5[\.\s]?1|ac3|dts|aac|av1|xvid|ld-aac)\b', ' ', clean_name)

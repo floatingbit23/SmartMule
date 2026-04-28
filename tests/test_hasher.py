@@ -1,9 +1,22 @@
 """
-test_hasher.py — Tests unitarios del módulo de hashing ED2K de SmartMule.
+TEST SUITE: MOTOR DE HASHING PARALELO (ED2K INTEGRITY)
 
-Verifico el algoritmo ED2K con archivos sintéticos y valores de referencia conocidos.
-Todos los tests usan tempfile para crear archivos temporales en memoria y no dependen
-de archivos reales del disco, lo que los hace rápidos y reproducibles.
+Este suite valida la precisión y robustez del motor de hashing paralelo de SmartMule. 
+Se enfoca en garantizar que el algoritmo ED2K se comporte según el estándar oficial 
+de eDonkey2000, manejando correctamente la segmentación de datos.
+
+1. Integridad del Algoritmo (MD4 Tree):
+   - Objetivo: Validar la jerarquía de hashes para archivos de cualquier tamaño.
+   - Verificación: Se prueban archivos vacíos, menores a un chunk (<9.28MB), 
+     exactamente un chunk (9.28MB), y archivos multi-chunk (>9.28MB) con restos parciales.
+   - Resultado esperado: Coincidencia bit-a-bit con los valores de referencia MD4.
+
+2. Estándar de Enlaces (ED2K Links):
+   - Objetivo: Asegurar que los enlaces generados sean compatibles con clientes P2P.
+   - Verificación: Comprobación de separadores, nombrado de archivos y tipado de tamaños.
+   - Resultado esperado: Formato exacto 'ed2k://|file|<name>|<size>|<hash>|/'.
+
+Todos los tests son atómicos, reproducibles y usan archivos sintéticos en memoria.
 """
 
 import tempfile

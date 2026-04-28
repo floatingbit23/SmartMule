@@ -198,19 +198,101 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
         if select_all:
             to_delete = results
         else:
-            choice = input(f"\nSelecciona el numero a purgar (o introduce 'all' para todos, 'q' para salir): ").strip().lower()
-            if choice == 'q':
-                db.close()
+            choice = input(f"\nSelección [ej: 1, 3-5] (o 'all'/'quit'): ").strip().lower()
+            
+            # Si presiona salir
+            if choice == 'quit':
+                db.close() # Cierra la conexion con la base de datos
                 return
+
+            # Si presiona todos
             if choice == 'all':
-                to_delete = results
+                to_delete = results # Selecciona todos los resultados para borrarlos
+
+            # Si presiona numeros
             else:
-                idx = int(choice) - 1
-                if 0 <= idx < len(results):
-                    to_delete = [results[idx]]
-                else:
-                    print("\n[!] Seleccion no válida.")
+                # Intentamos procesar la entrada del usuario (puede fallar si no son números)
+                try:
+                    # Dividimos la entrada por comas, eliminamos espacios y descartamos elementos vacíos
+                    parts = [p.strip() for p in choice.split(",") if p.strip()]
+
+                    # Si no queda nada después del filtrado, lanzamos un error para ir al bloque except
+                    if not parts:
+                        raise ValueError("Entrada vacía")
+                    
+                    # Lista temporal para acumular los índices de los archivos a borrar
+                    indices = []
+
+                    # Iteramos sobre cada fragmento separado por comas
+                    for p in parts:
+
+                        # Si el fragmento detecta un guion, lo tratamos como un rango numérico
+                        if '-' in p:
+                            # Dividimos el rango en valor inicial y valor final
+                            start, end = p.split('-')
+                            # Convertimos a entero y restamos 1 para ajustar al índice 0 de Python
+                            start = int(start) - 1
+                            # Hacemos lo mismo con el valor final del rango
+                            end = int(end) - 1
+
+                            # Validamos que el rango sea lógico, positivo y no se salga de la lista
+                            if 0 <= start <= end < len(results):
+
+                                # Añadimos todos los números del rango a nuestra lista de índices
+                                indices.extend(range(start, end + 1))
+
+                            # Si el rango es incoherente o se sale de los límites...
+                            else:
+                                # Informamos del error específico al usuario
+                                print(f"\n[!] El rango '{p}' no es válido.")
+
+                                # Cerramos la conexión a la BBDD por seguridad antes de salir
+                                db.close()
+
+                                # Abortamos la función de purga
+                                return
+
+                        # Si no hay guion (no es rango), tratamos el fragmento como un número único
+                        else:
+
+                            # Convertimos a entero y restamos 1 para el índice de la lista
+                            idx = int(p) - 1
+
+                            # Verificamos que el número esté dentro del rango de resultados disponibles
+                            if 0 <= idx < len(results):
+
+                                # Añadimos el índice único a nuestra lista
+                                indices.append(idx)
+
+                            # Si el número no corresponde a ningún archivo de la lista...
+
+                            else:
+
+                                # Informamos del error de índice inexistente
+                                print(f"\n[!] El número '{p}' no existe en la lista.")
+
+                                # Cerramos la conexión a la base de datos
+                                db.close()
+
+                                # Salimos de la función
+                                return
+                    
+                    # Convertimos la lista a set (para borrar duplicados), volvemos a lista y ordenamos
+                    indices = sorted(list(set(indices)))
+
+                    # Creamos la lista final de objetos a borrar usando los índices validados
+                    to_delete = [results[i] for i in indices]
+                    
+                # Si en algún punto falla la conversión int() o hay un error de formato...
+                except ValueError:
+
+                    # Informamos al usuario del formato correcto esperado
+                    print("\n[!] Entrada no válida. Usa números separados por comas (ej: 1, 3) o rangos (ej: 1-3).")
+
+                    # Cerramos la base de datos para no dejar conexiones abiertas
                     db.close()
+
+                    # Terminamos la ejecución
                     return
 
         # Confirmación física final
@@ -338,42 +420,72 @@ def main() -> None:
         except AttributeError:
             pass # Para versiones de Python muy antiguas (poco probable)
 
-    parser = argparse.ArgumentParser(description="SmartMule - El Bibliotecario Inteligente P2P")
+    # --- CONFIGURACIÓN DE LA INTERFAZ DE COMANDOS (CLI) ---
+    parser = argparse.ArgumentParser(
+        description="""
++===========================================================+
+|  SmartMule - El Bibliotecario Inteligente P2P             |
++===========================================================+
+
+COMANDOS DE SERVICIO:
+  start             Arranca el motor de vigilancia y organización (por defecto).
+  stop              Detiene la instancia activa de SmartMule de forma segura.
+
+HERRAMIENTAS ADMINISTRATIVAS:
+  --list            Muestra un resumen detallado de la biblioteca.
+  --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
+  --all             (Purga) Selecciona automáticamente todos los resultados.
+  --no-preserve     (Purga) Borra archivos físicos sin pedir confirmación.
+  --debug           Habilita logs detallados (DEBUG) para diagnóstico.
+  -h, --help        Muestra este manual de usuario.
+""",
+        formatter_class=argparse.RawTextHelpFormatter,
+        usage="python main.py [start|stop] [opciones]",
+        epilog="""
+EJEMPLOS DE USO:
+  > python main.py start              # Iniciar SmartMule
+  > python main.py stop               # Detener SmartMule
+  > python main.py --list             # Ver inventario
+  > python main.py --purge "Matrix"   # Limpiar archivos por búsqueda
+"""
+    )
     
-    # Soporte para argumentos posicionales clásicos
-    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop", "purge", "list"], 
-                        help="Acción principal (start, stop, purge, list)")
-    parser.add_argument("query_pos", nargs="?", help="Término de búsqueda (si se usa la acción 'purge')")
+    # Personalizamos el mensaje de error para que sugiera el uso de --help
+    def custom_error(message):
+        print(f"\n\033[91m[ERROR]\033[0m {message}")
+        print("[INFO] Usa --help para mas informacion.\n")
+        sys.exit(2)
+        
+    parser.error = custom_error
+    
+    # Soporte para argumentos posicionales (Solo ciclo de vida del proceso)
+    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop"], 
+                        help=argparse.SUPPRESS)
+    parser.add_argument("query_pos", nargs="?", help=argparse.SUPPRESS)
 
     # Interfaz de Flags modernas
-    parser.add_argument("--purge", nargs="?", const=True, help="Ejecutar purga de archivos")
-    parser.add_argument("--list", action="store_true", help="Listar inventario de la biblioteca")
-    parser.add_argument("--all", action="store_true", help="Seleccionar todos los archivos encontrados")
-    parser.add_argument("--no-preserve", action="store_true", help="Modo destructivo: borra todo sin confirmar")
-    parser.add_argument("--debug", action="store_true", help="Habilita los logs de nivel DEBUG")
+    parser.add_argument("--purge", nargs="?", const=True, help=argparse.SUPPRESS)
+    parser.add_argument("--list", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-preserve", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     
     args = parser.parse_args()
 
-    # 1. Acción STOP: Se puede ejecutar incluso si el Singleton está bloqueado (porque es para pararlo)
+    # 1. Acción STOP: Se puede ejecutar incluso si el Singleton está bloqueado
     if args.action == "stop":
         stop_daemon()
         sys.exit(0)
 
-    # 2. Acción PURGE: Herramienta administrativa que puede correr en paralelo al motor
-    is_purge = (args.action == "purge" or args.purge is not None)
-    if is_purge:
-        query = ""
-        if isinstance(args.purge, str):
-            query = args.purge
-        elif args.query_pos:
-            query = args.query_pos
-            
-        purge_files(query, select_all=args.all, no_preserve=args.no_preserve)
+    # 2. Acción LIST: Inventario de la biblioteca
+    if args.list:
+        list_files()
         sys.exit(0)
 
-    # 2.5 Acción LIST: Inventario de la BBDD
-    if args.action == "list" or args.list:
-        list_files()
+    # 3. Acción PURGE: Herramienta administrativa
+    if args.purge is not None:
+        query = args.purge if isinstance(args.purge, str) else (args.query_pos or "")
+        purge_files(query, select_all=args.all, no_preserve=args.no_preserve)
         sys.exit(0)
 
     # 3. Acción START: El motor principal. Requiere exclusividad (patrón de diseño Singleton)

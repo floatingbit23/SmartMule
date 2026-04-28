@@ -1,3 +1,25 @@
+"""
+TEST SUITE: ORGANIZACIÓN MEDIANTE HARDLINKS (STORAGE EFFICIENCY)
+
+Este suite verifica la capacidad de SmartMule para organizar archivos sin duplicar datos físicos, 
+utilizando hardlinks para ahorrar espacio en disco.
+
+1. Persistencia de Datos (Link Count):
+   - Objetivo: Confirmar que el archivo existe en dos rutas pero ocupa un único espacio físico.
+   - Verificación: Comprobación del contador 'st_nlink' (debe ser >= 2) y el ID de inode.
+   - Resultado esperado: Ambos archivos comparten el mismo inode y reflejan cambios mutuos.
+
+2. Integridad de Directorios:
+   - Objetivo: Validar la recreación de estructuras de carpetas mediante hardlinking masivo.
+   - Verificación: Procesamiento de directorios complejos con múltiples subniveles.
+   - Resultado esperado: Estructura de espejo en la biblioteca vinculada al origen.
+
+3. Seguridad y Fallbacks:
+   - Objetivo: Garantizar que si el hardlink no es posible, los datos no se pierdan.
+   - Verificación: Simulación de errores de sistema y comprobación de integridad post-error.
+   - Resultado esperado: El sistema debe ser capaz de recuperarse sin corrupción de datos.
+"""
+
 import pytest
 import os
 import shutil

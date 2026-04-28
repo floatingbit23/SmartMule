@@ -226,7 +226,26 @@ class LibraryOrganizer:
 
         # Si el modo es "move", muevo el archivo o directorio
         if mode == "move":
-            shutil.move(str(src), str(dest))
+
+            # Validamos si origen y destino están en el mismo disco físico (Zero-Copy Validation)
+            if self._is_same_device(src, dest):
+
+                """
+                Si lo están, 'os.rename' es instantáneo y solo cambia el puntero en el sistema de archivos.
+                Ejemplos de Zero-Copy:
+                - Movimientos de punteros en la MTF del sistema de archivos NTFS en Windows
+                - Movimientos en sistemas de archivos Apple File System (APFS) en macOS
+                - Movimientos en sistemas de archivos Ext4 en Linux
+                """
+
+                # Realizo el movimiento
+                os.rename(str(src), str(dest))
+                logger.debug(f"⚡  Movimiento 'Zero-Copy' completado para {src.name}")
+
+            else:
+                # Si están en discos distintos, avisamos que la operación será más lenta (Copy + Delete)
+                logger.warning(f"💾 Movimiento entre discos detectado: {src.name} se copiará al nuevo destino. Esto puede tardar unos minutos...")
+                shutil.move(str(src), str(dest))
             
         # Si el modo es "copy", copio el archivo o directorio
         elif mode == "copy":
@@ -241,6 +260,7 @@ class LibraryOrganizer:
 
             try:
 
+                # Si la carpeta de origen es un directorio
                 if src.is_dir():
 
                     # Para carpetas, recreo la estructura de carpetas y hardlinkeo cada fichero base
@@ -260,26 +280,49 @@ class LibraryOrganizer:
                             rel_path = (root_path / f).relative_to(src)
                             os.link(root_path / f, dest / rel_path)
                 
+                # Si la carpeta de origen es un archivo
                 else:
-                    os.link(src, dest)
+                    os.link(src, dest) # crea un Hardlink del archivo
+                
+                logger.info(f"🔗  Hardlink creado: {src.name} -> {dest.name}")
 
-            # Si falla un hardlink por error de partición cruzada, realiza silenciosamente un fallback a "copy"
-            except OSError as e:
+            except (OSError, PermissionError) as e:
 
-                import errno
-                # Catch Cross-device link condition (Diferentes unidades como C: a D:)
-
-                if e.errno == errno.EXDEV:
-                    logger.warning(f"⚠️  ¡Archivo en distinta partición!. Realizando copia en vez de hardlink para: {src.name}...")
-
-                    if src.is_dir():
-                        shutil.copytree(src, dest, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src, dest)
-                else:
-                    raise # Rethrow si fuera error por falta de permisos u otra anomalía
+                # Fallback silencioso a copia si falla el hardlink (ej: intento entre particiones distintas C: y D:)
+                logger.warning(f"⚠️  No se pudo crear hardlink ({e}). Reintentando mediante copia física...")
+                self._transfer_item_as_copy(src, dest)
 
         else:
             # Fallback the fallback en caso de environment variable mal tipada
             shutil.move(str(src), str(dest))
+
+    # Función auxiliar booleana para verificar si dos rutas pertenecen al mismo dispositivo físico/partición
+    def _is_same_device(self, path1: Path, path2: Path) -> bool:
+        """
+        Verifica si dos rutas pertenecen al mismo dispositivo físico/partición.
+        Útil para garantizar operaciones 'Zero-Copy' instantáneas.
+        """
+        try:
+
+            # Comparamos el ID del dispositivo (st_dev).
+            # Si coinciden, os.rename() es una operación de punteros instantánea.
+            
+            # Nota: path2 puede no existir aún, así que comprobamos su padre
+            s1 = os.stat(path1).st_dev
+            s2 = os.stat(path2.parent).st_dev
+            
+            return s1 == s2
+        except Exception:
+            return False
+
+    # Función auxiliar para realizar copias físicas de seguridad
+    def _transfer_item_as_copy(self, src: Path, dest: Path) -> None:
+        
+        # Si la carpeta de origen es un directorio
+        if src.is_dir():
+            # Copia recursiva de directorios
+            shutil.copytree(src, dest)
+        else:
+            # Copia de archivos (preserva metadatos)
+            shutil.copy2(src, dest)
 

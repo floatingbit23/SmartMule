@@ -207,7 +207,7 @@ pytest -v --tb=short
 
 SmartMule incluye un **motor de hashing ED2K de alto rendimiento** diseñado para no saturar tu sistema, que reduce el tiempo de cálculo del hash de forma exponencial:
 
--   **Arquitectura Híbrida**: Lectura secuencial de disco (`IOPRIO_VERYLOW`) combinada con cálculo paralelo mediante hilos (`multi-threading`). Esta arquitectura evita el copiado de memoria y alcanza velocidades de procesado de hasta **4GB/s**.
+-   **Arquitectura Híbrida**: Lectura secuencial de disco (`IOPRIO_VERYLOW`) combinada con cálculo paralelo mediante hilos (`multi-threading`)
 
 -   **Control de RAM**: Sistema de _Backpressure_ que garantiza un consumo de memoria mínimo y constante (~55MB), sin importar si procesas un archivo de 1GB o una ISO de 200GB.
 
