@@ -80,9 +80,12 @@ class MetadataEngine:
 
         if data.get("confidence") == "low": # Si la confianza en el resultado de Regex es baja, escalamos a IA
 
-            logger.info("⚠️  Nombre de archivo confuso. Consultando a la IA (Capa 2)...")
-
-            ai_data = parse_with_llm(filename) # Llamamos a la IA
+            # Pasamos los datos que ya sabemos (idiomas, subs) como pistas a la IA
+            context_data = {
+                "languages": data.get("languages"),
+                "subtitles": data.get("subtitles")
+            }
+            ai_data = parse_with_llm(filename, context=context_data) # Llamamos a la IA con pistas
             
             # Si la IA tuvo éxito, combinamos
             if ai_data.get("confidence") != "failed":
@@ -90,9 +93,14 @@ class MetadataEngine:
                 # Respetamos la extensión original que sacó la Capa 1
                 ai_data["extension"] = data.get("extension")
                 
+                # Respetamos resolución, idiomas y subtítulos detectados por Regex (más fiable para etiquetas técnicas)
+                ai_data["resolution"] = data.get("resolution", "")
+                ai_data["languages"] = data.get("languages", "")
+                ai_data["subtitles"] = data.get("subtitles", "")
+                
                 # Respetamos el media_type original (obtenido por Regex) si la IA lo borró o no sabía ("unknown")
                 if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
-                    ai_data["media_type"] = data.get("media_type") 
+                    ai_data["media_type"] = data.get("media_type")
                     
                 data = ai_data # Combinamos los datos de la IA con los de Regex
 

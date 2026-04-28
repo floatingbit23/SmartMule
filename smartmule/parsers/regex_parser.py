@@ -16,12 +16,27 @@ EXTENSION_MAPPING = {
     "info": {".nfo", ".sfv", ".md5", ".sha1"} # Información y Verificación de la Escena
 }
 
+# Mapa de normalización de idiomas (Alias -> Código Estándar)
+LANGUAGE_MAP = {
+    "SPANISH": "ES", "ESPAÑOL": "ES", "ESP": "ES", "SPA": "ES", "LATINO": "ES", "CASTELLANO": "ES",
+    "ENGLISH": "EN", "ENG": "EN", "INGLES": "EN", "INGLÉS": "EN",
+    "ITALIAN": "IT", "ITALIANO": "IT", "ITA": "IT",
+    "GERMAN": "DE", "DEUT": "DE", "GER": "DE",
+    "FRENCH": "FR", "FRE": "FR", "FRA": "FR",
+    "RUSSIAN": "RU", "RUS": "RU",
+    "PORTUGUESE": "PT",
+    "CHINESE": "ZH", "CHI": "ZH",
+    "JAPANESE": "JP", "JAP": "JP"
+}
+
 # Etiquetas de P2P comunes a eliminar (Códecs, Calidades, Release Groups (ripeos), ...)
 SCENE_TAGS = [
     r"hdrip", r"web-dl", r"x264", r"x265", r"hevc", r"aac", r"ac3", r"e-ac3",
     r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
-    r"yify", r"rarbg", r"xrg", r"vpp", r"ion10", r"psa", r"qxr", r"sparks", 
+    r"yify", r"yts", r"rarbg", r"xrg", r"vpp", r"ion10", r"psa", r"qxr", r"sparks", 
     r"geckos", r"drones", r"amiable", r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip",
+    r"galaxy", r"ethel", r"joy", r"hazmat", r"tigole", r"vyndros", r"evo", r"cyber",
+    r"yolow", r"btdx8", r"olimpo", r"p73", r"armor", r"mokona", r"bone", r"bkk", r"micro",
     # Audio Tags
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
     # Additional Technical Tags
@@ -53,8 +68,20 @@ SCENE_TAGS = [
 # Etiquetas de calidad de video
 QUALITY_TAGS = [r"4k", r"2160p", r"1080p", r"720p", r"480p", r"1080i", r"uhd"]
 
-# uhd = Ultra High Definition
-
+def fix_mojibake(text: str) -> str:
+    """Intenta reparar errores de codificación comunes (Mojibake)."""
+    if not text:
+        return text
+    try:
+        # El patrón típico de eMule: UTF-8 leído como Latin-1
+        # Solo lo intentamos si detectamos caracteres sospechosos
+        if any(c in text for c in "ÃÂ"):
+            return text.encode('latin-1').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    
+    # Si falla, simplemente eliminamos caracteres de control no imprimibles
+    return "".join(c for c in text if c.isprintable())
 
 def parse_filename(filename: str) -> dict:
 
@@ -63,35 +90,46 @@ def parse_filename(filename: str) -> dict:
     Es el paso inicial de la "Capa 1" del pipeline.
     """
     
-    # 1. Obtenemos extensión real (Convertimos a Path temporal para manejar esto).
-    path_obj = Path(filename) 
-    extension = path_obj.suffix.lower() 
-    base_name = path_obj.stem # Sin extensión
+    # 0. Reparar codificación antes de empezar
+    filename = fix_mojibake(filename)
+    
+    # 1. Obtenemos extensión real.
+    # Si el nombre NO tiene punto al final o es una carpeta, el suffix de Path puede ser engañoso.
+    path_obj = Path(filename)
+    
+    # Solo consideramos extensión si el archivo realmente tiene un tipo conocido al final
+    raw_ext = path_obj.suffix.lower()
+    extension = ""
+    base_name = filename
 
-    # Ejemplo: filename = "The.Matrix.1999.1080p.BluRay.x264-SPARKS.mkv"
-    # extension = ".mkv"
-    # base_name = "The.Matrix.1999.1080p.BluRay.x264-SPARKS"
+    # Verificamos si la extensión es válida buscando en nuestro mapeo
+    for exts in EXTENSION_MAPPING.values():
+        if raw_ext in exts:
+            extension = raw_ext
+            base_name = path_obj.stem
+            break
 
     # Mapear media_type
     media_type = "unknown"
-
-    # Recorremos el diccionario EXTENSION_MAPPING
     for m_type, exts in EXTENSION_MAPPING.items():
-        if extension in exts: # Si la extensión está en el diccionario
-            media_type = m_type # Asignamos el tipo de medio
-            break # Salimos del bucle
+        if extension in exts:
+            media_type = m_type
+            break
             
 
     # Datos por defecto
     result = {
-        "title": base_name, # 
+        "title": base_name, 
         "year": None, 
         "season": None,
         "episode": None,
         "quality": None,
+        "resolution": "",
+        "languages": "",
+        "subtitles": "",
         "media_type": media_type,
         "extension": extension,
-        "confidence": "low" # Confianza baja por defecto
+        "confidence": "low"
     }
 
     # === REGEX ===
@@ -99,8 +137,8 @@ def parse_filename(filename: str) -> dict:
     # Sustitución de separadores comunes por espacios.
     clean_name = re.sub(r'[\._]', ' ', base_name)
     
-    # Extraer año
-    year_match = re.search(r'\(?(19\d{2}|20\d{2})\)?', clean_name)
+    # Extraer año (Buscamos 19xx o 20xx)
+    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', clean_name)
 
     if year_match:
         result["year"] = int(year_match.group(1))
@@ -109,11 +147,9 @@ def parse_filename(filename: str) -> dict:
         
 
     # Extraer temporada y episodio. Patrones como S01E03, 1x03, Season 1 Episode 3... 
-    # S01E03
     s_e_match = re.search(r's(\d{1,2})e(\d{1,2})', clean_name, re.IGNORECASE)
 
     if not s_e_match:
-        # Capta patrón 1x03
         s_e_match = re.search(r'(?i)\b(\d{1,2})x(\d{1,2})\b', clean_name)
     
     if s_e_match:
@@ -124,7 +160,6 @@ def parse_filename(filename: str) -> dict:
     # Extraer Calidad de vídeo
     for q_tag in QUALITY_TAGS:
         q_match = re.search(r'\b' + q_tag + r'\b', clean_name, re.IGNORECASE)
-
         if q_match:
             result["quality"] = q_match.group(0).lower()
             clean_name = clean_name.replace(q_match.group(0), " ")
@@ -136,37 +171,149 @@ def parse_filename(filename: str) -> dict:
 
     # Eliminar la firma del uploader (como "by mDudikoff" o "-GrpName")
     clean_name = re.sub(r'(?i)\bby\s+[\w\d-]+\b', '', clean_name)
-    clean_name = re.sub(r'-\s*\w+$', '', clean_name)
+    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+$', '', clean_name)
     
+    # Extraer resoluciones ANTES de borrarlas (ej: 1920x1080)
+    res_matches = re.findall(r'(?i)\b\d{3,4}x\d{3,4}\b', clean_name)
+    if res_matches:
+        # Usamos set() para evitar duplicados
+        result["resolution"] = ", ".join(sorted(list(set(res_matches)))).lower()
+    clean_name = re.sub(r'(?i)\b\d{3,4}x\d{3,4}\b', ' ', clean_name)
+
+    # === EXTRACCIÓN Y NORMALIZACIÓN DE IDIOMAS ===
+    
+    # Generamos un patrón dinámico con todas las claves de nuestro mapa de idiomas
+    lang_pattern = r'\b(' + '|'.join(re.escape(k) for k in LANGUAGE_MAP.keys()) + r')\b'
+    
+    # 1. Buscamos combinaciones (ej: ESP-ENG) o idiomas sueltos (ej: Latino, Spanish)
+    # También buscamos códigos prefijados con + (ej: +ES)
+    found_langs = re.findall(r'(?i)\b(?:[a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', clean_name)
+    found_langs += re.findall(r'(?i)' + lang_pattern, clean_name)
+    found_langs += re.findall(r'(?i)\b(?:\+([a-z]{2,10}))\b', clean_name)
+
+    if found_langs:
+        valid_codes = []
+        # Lista de palabras técnicas que NO pueden ser idiomas (para evitar falsos positivos como WEB-DL)
+        technical_blacklist = {"WEB", "DL", "RIP", "BD", "BR", "HD", "TS", "TC", "MD", "HC", "V2", "PROPER", "REPACK"}
+
+        for match in found_langs:
+            # Si el match es una combinación (ej: ES-EN), la dividimos
+            parts = re.split(r'[-+\/&]', match) if any(c in match for c in "-+/&") else [match]
+            
+            for p in parts:
+                p_clean = p.upper().strip()
+                
+                # REGLA: Si la palabra está en la lista negra técnica, la ignoramos como idioma
+                if p_clean in technical_blacklist:
+                    continue
+
+                # Normalizamos usando el mapa
+                if p_clean in LANGUAGE_MAP:
+                    valid_codes.append(LANGUAGE_MAP[p_clean])
+                elif len(p_clean) == 2 and p_clean.isalpha() and p_clean != "BY":
+                    # Aceptamos códigos de 2 letras si no son palabras comunes como "BY"
+                    valid_codes.append(p_clean)
+        
+        if valid_codes:
+            # Guardamos códigos únicos y ordenados (ej: EN-ES)
+            result["languages"] = "-".join(sorted(list(set(valid_codes))))
+
+    # === EXTRACCIÓN DE SUBTÍTULOS (VOSE, VOS, SUBS, HC) ===
+    # Buscamos patrones de subtítulos (incluyendo V O S con espacios y HCSubs)
+    sub_pattern = r'(?i)\b(v\s*o\s*s\s*e|v\s*\.\s*o\s*\.\s*s\s*\.\s*e\s*\.?|v\s*\.\s*o\s*\.\s*s\s*\.?|v\s*o\s*s|subs?|subtitles?|hc-?subs?)\b'
+    sub_matches = re.findall(sub_pattern, clean_name)
+    
+    if sub_matches:
+        subs_found = []
+        for sm in sub_matches:
+            sm_clean = sm.lower().replace(".", "").replace(" ", "").replace("-", "")
+            if "vose" in sm_clean:
+                subs_found.append("ES")
+            elif "vos" in sm_clean:
+                subs_found.append("Original")
+            elif "hc" in sm_clean:
+                subs_found.append("Hardcoded")
+            else:
+                subs_found.append("Yes")
+        
+        if subs_found:
+            result["subtitles"] = "/".join(sorted(list(set(subs_found))))
+
+    # Limpieza de rastros de idiomas y subtítulos en el título
+    clean_name = re.sub(r'(?i)\b([a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(\+[a-z]{2,10})\b', ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(subs?&\w+)\b', ' ', clean_name)
+    clean_name = re.sub(sub_pattern, ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(hq)\b', ' ', clean_name) # Limpiamos HQ específicamente
+
     # Eliminar paréntesis y corchetes que queden solos o tengan extras
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
-    # Quitar palabras como "Spanish", "English", "Subs", "Dual"
-    clean_name = re.sub(r'(?i)\b(spanish|spa|eng|english|subs|sub|dual|ita|iTALiAN|ita|fre|latino|castellano)\b', ' ', clean_name)
-
-    # Limpieza de dominios web (ej: savetube.me, viciao.es, etc.)
-    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|me|tv|info)\b', ' ', clean_name)
-
-    # Limpieza de resoluciones (ej: 1920x1080, 1280x720)
-    clean_name = re.sub(r'(?i)\b\d{3,4}x\d{3,4}\b', ' ', clean_name)
-
-    # Limpieza final de espacios duplicados y trim
-    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    # Quitar palabras técnicas y extensiones falsas (Lista extendida y más agresiva)
+    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv)\b', ' ', clean_name)
     
-    # Si tras la reducción el string ha perdido todo sentido ("") o ha quitado de más 
-    # (por ejemplo "1" de "Matrix 1" fue tomado como algo raro aunque no deberia),
-    if not clean_name:
-        clean_name = base_name  # Fallback: nos rendimos, la IA deberá arreglarlo
+    # Quitar códecs con puntos o espacios (ej: H.264, DD5.1, DD5 1)
+    clean_name = re.sub(r'(?i)\b(h[\.\s]?264|x[\.\s]?264|h[\.\s]?265|x[\.\s]?265|dd[\.\s]?5[\.\s]?1|ac3|dts|aac|av1|xvid|ld-aac)\b', ' ', clean_name)
 
-    result["title"] = clean_name
+    # Quitar palabras de idiomas (solo las largas o técnicas) usando el mapa dinámico
+    # Filtramos el mapa para NO incluir códigos de 2 letras (evita colisiones con "en", "es"), 
+    # pero SÍ incluimos los de 3 letras (SPA, ENG, ITA) que son seguros.
+    lang_clean_list = [k for k in LANGUAGE_MAP.keys() if len(k) > 2]
+    lang_clean_pattern = '|'.join(re.escape(k) for k in lang_clean_list)
+    clean_name = re.sub(r'(?i)\b(' + lang_clean_pattern + r'|subs?|sub|dual|vose|multi|v\.o\.s\.?|v\.o\.s\.e\.?)\b', ' ', clean_name)
 
-    # Determinación heurística de LA CONFIANZA.
-    # Si logramos extraer el nombre y hay año o es temporada clara, confiamos MUCHO.
-    if result["year"] is not None or (result["season"] is not None):
-        result["confidence"] = "high"
+    # Limpieza de etiquetas de calidad pegadas y tipos de ripeo de cine
+    clean_name = re.sub(r'(?i)\b(bd|br|web|hd)1080p\b', ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(telesync|ts|tc|hdts|hc-ts|hcsubs|camrip|cam|ld|md)\b', ' ', clean_name)
+
+    # Limpieza de dominios web avanzada (solo si llevan punto antes para evitar colisiones con "es", "me", etc.)
+    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|li|be|yt|us)\b', ' ', clean_name)
+
+    # Eliminar puntuación residual pero PRESERVANDO apóstrofes internos para contracciones (He's, Don't)
+    # Primero quitamos puntuación de los bordes de las palabras
+    clean_name = re.sub(r'(?<![a-zA-Z])\'|\'(?![a-zA-Z])', '', clean_name)
+    # Luego quitamos otros símbolos molestos excepto el apóstrofe y el guion
+    clean_name = re.sub(r'[^a-zA-Z0-9\'áéíóúÁÉÍÓÚñÑ\- ]', ' ', clean_name)
+
+    # Eliminar caracteres no-latinos "basura" al principio y al final
+    clean_name = re.sub(r'^[^a-zA-Z0-9(]+', '', clean_name)
+    clean_name = re.sub(r'[^a-zA-Z0-9)]+$', '', clean_name)
+
+    # === FASE FINAL: Normalización de "Cicatrices" ===
+    
+    # 1. Eliminar cualquier palabra de 1 o 2 letras que haya quedado suelta al final (típicos restos de tags)
+    clean_name = re.sub(r'\s+[a-zA-Z0-9]{1,2}$', '', clean_name)
+
+    # 2. Convertir múltiples espacios o guiones en uno solo (de forma separada para no romper " - ")
+    clean_name = re.sub(r'\s{2,}', ' ', clean_name)
+    clean_name = re.sub(r'-{2,}', '-', clean_name)
+    
+    # 3. Eliminar guiones o puntos que hayan quedado volando al principio o final
+    clean_name = clean_name.strip(' .-')
+
+    # 4. Eliminar "cicatrices" de guiones dobles en medio (ej: "Titulo - - Subtitulo")
+    clean_name = clean_name.replace('- -', '-')
+    
+    # 5. Si después de todo queda vacío, devolvemos el original
+    if not clean_name.strip():
+        clean_name = base_name
+
+    result["title"] = clean_name.strip()
+
+    # --- DETERMINACIÓN DE CONFIANZA ---
+    # Solo confiamos si tenemos año/temporada Y el título está MUY limpio
+    if (result["year"] or result["season"]):
+        # Penalizamos si quedan guiones huérfanos, caracteres raros o el título es muy corto
+        has_noise = re.search(r'[+&/]', clean_name)
+        # Si el título termina en guion o tiene guiones vacios, bajamos confianza
+        is_clean = not has_noise and "." not in clean_name and " - -" not in clean_name
         
-    # Los libros, audios, software o archivos comprimidos suelen ser limpios directamente o los tratamos directamente:
-    if result["media_type"] in ["book", "software", "audio", "compressed"]:
+        if len(clean_name) > 5 and is_clean:
+            result["confidence"] = "high"
+        else:
+            result["confidence"] = "low"
+        
+    if result["media_type"] in ["book", "software", "audio"]:
         result["confidence"] = "high"
         
     return result

@@ -45,3 +45,4 @@ pytest.ini
 
 # Testing/Temporary Files
 tmp/
+scratch/

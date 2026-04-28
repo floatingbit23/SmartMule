@@ -249,7 +249,7 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
             db.delete_by_id(item['id'])
             print(f"  [OK] Registro eliminado de la base de datos.")
 
-        print(f"\n[DONE] ¡Purga completada con éxito!")
+        print(f"\n[DONE] ¡Purga completada con éxito!\n")
 
     except ValueError:
         print("[!] Entrada no valida.")
@@ -259,17 +259,81 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
         db.close() # Siempre cerramos la conexión a la BBDD
 
 
+def list_files() -> None:
+    """
+    Lista todos los archivos registrados en la base de datos y muestra estadísticas.
+    """
+    db = HashDatabase(DB_PATH)
+    try:
+        stats = db.get_stats()
+        files = db.get_all_files()
+
+        print("\n===================================================")
+        print("          SmartMule: Inventario de Biblioteca")
+        print("===================================================")
+        
+        CATEGORY_ICONS = {
+            "video": "🎬",
+            "tv series": "📺",
+            "audio": "🎵",
+            "book": "📚",
+            "software": "💾",
+            "image": "🖼️",
+            "compressed": "🗜️",
+            "unknown": "❓"
+        }
+
+        if not files:
+            print("\n[i] La biblioteca está vacía.")
+        else:
+            for f in files:
+                m_type = f.get("media_type", "unknown")
+                icon = CATEGORY_ICONS.get(m_type, "❓")
+                title = f.get("official_title") or f.get("file_name")
+                
+                # Truncamos títulos largos para que no rompan la consola
+                if len(title) > 60:
+                    title = title[:57] + "..."
+                
+                print(f" {icon} {title}")
+
+        print("\n---------------------------------------------------")
+        print(f"  📊 Total de archivos: {stats['total']}")
+        
+        if stats["categories"]:
+            print("  📂 Desglose por categorías:")
+            for cat, count in stats["categories"].items():
+                icon = CATEGORY_ICONS.get(cat, "❓")
+                print(f"     {icon} {cat.capitalize()}: {count}")
+        
+        print("===================================================\n")
+
+    except Exception as e:
+        print(f"[ERROR] Error al listar archivos: {e}")
+    finally:
+        db.close()
+
+
 def main() -> None:
     """Orquestación principal de SmartMule."""
+    
+    # Forzamos UTF-8 en la consola CMD/PowerShell para evitar errores con Emojis en Windows
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except AttributeError:
+            pass # Para versiones de Python muy antiguas (poco probable)
+
     parser = argparse.ArgumentParser(description="SmartMule - El Bibliotecario Inteligente P2P")
     
     # Soporte para argumentos posicionales clásicos
-    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop", "purge"], 
-                        help="Acción principal (start, stop, purge)")
+    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop", "purge", "list"], 
+                        help="Acción principal (start, stop, purge, list)")
     parser.add_argument("query_pos", nargs="?", help="Término de búsqueda (si se usa la acción 'purge')")
 
     # Interfaz de Flags modernas
     parser.add_argument("--purge", nargs="?", const=True, help="Ejecutar purga de archivos")
+    parser.add_argument("--list", action="store_true", help="Listar inventario de la biblioteca")
     parser.add_argument("--all", action="store_true", help="Seleccionar todos los archivos encontrados")
     parser.add_argument("--no-preserve", action="store_true", help="Modo destructivo: borra todo sin confirmar")
     parser.add_argument("--debug", action="store_true", help="Habilita los logs de nivel DEBUG")
@@ -291,6 +355,11 @@ def main() -> None:
             query = args.query_pos
             
         purge_files(query, select_all=args.all, no_preserve=args.no_preserve)
+        sys.exit(0)
+
+    # 2.5 Acción LIST: Inventario de la BBDD
+    if args.action == "list" or args.list:
+        list_files()
         sys.exit(0)
 
     # 3. Acción START: El motor principal. Requiere exclusividad (patrón de diseño Singleton)

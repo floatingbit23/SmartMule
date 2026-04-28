@@ -38,7 +38,7 @@ class HashDatabase:
     # Uso 'CREATE TABLE IF NOT EXISTS' para que sea idempotente (se puede llamar múltiples veces sin error).
     
     _CREATE_TABLE_SQL = """
-        CREATE TABLE IF NOT EXISTS hashes (
+        CREATE TABLE IF NOT EXISTS files (
             id           INTEGER PRIMARY KEY AUTOINCREMENT, -- Identificador único de cada registro
             file_path    TEXT NOT NULL, -- Ruta completa del archivo
             file_name    TEXT NOT NULL, -- Nombre del archivo
@@ -53,6 +53,9 @@ class HashDatabase:
             author TEXT DEFAULT '',
             score REAL DEFAULT 0,
             media_type TEXT DEFAULT 'unknown',
+            resolution TEXT DEFAULT '',
+            languages TEXT DEFAULT '',
+            subtitles TEXT DEFAULT '',
             security_verdict TEXT DEFAULT '',
             vt_url TEXT DEFAULT '',
             final_path TEXT DEFAULT '',
@@ -62,23 +65,26 @@ class HashDatabase:
 
     # Migraciones para añadir columnas a bases de datos antiguas de forma segura
     _MIGRATIONS = [
-        "ALTER TABLE hashes ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN file_mtime INTEGER DEFAULT 0;",
-        "ALTER TABLE hashes ADD COLUMN official_title TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN release_date TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN author TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN score REAL DEFAULT 0;",
-        "ALTER TABLE hashes ADD COLUMN media_type TEXT DEFAULT 'unknown';",
-        "ALTER TABLE hashes ADD COLUMN security_verdict TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN vt_url TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN final_path TEXT DEFAULT '';",
-        "ALTER TABLE hashes ADD COLUMN is_organized INTEGER DEFAULT 0;"
+        "ALTER TABLE files ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN file_mtime INTEGER DEFAULT 0;",
+        "ALTER TABLE files ADD COLUMN official_title TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN release_date TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN author TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN score REAL DEFAULT 0;",
+        "ALTER TABLE files ADD COLUMN media_type TEXT DEFAULT 'unknown';",
+        "ALTER TABLE files ADD COLUMN resolution TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN languages TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN subtitles TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN security_verdict TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN vt_url TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN final_path TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN is_organized INTEGER DEFAULT 0;"
     ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
     # NO es UNIQUE para evitar riesgo de colisiones de hashes SHA256 (aunque sean muy improbables).
     _CREATE_INDEX_SQL = """
-        CREATE INDEX IF NOT EXISTS idx_fingerprint_size ON hashes (fingerprint, file_size);
+        CREATE INDEX IF NOT EXISTS idx_fingerprint_size ON files (fingerprint, file_size);
     """
 
 
@@ -99,13 +105,6 @@ class HashDatabase:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.create_function("REGEXP", 2, self._regexp_worker)
-
-        # 'check_same_thread=False' es necesario porque la BBDD 
-        # es instanciada en el Main Thread (QueueManager._db) pero usada en el Worker Thread (_worker_loop._process_file._db.save())
-
-        # Configuro SQLite para que devuelva filas que se comportan como diccionarios.
-        self._conn.row_factory = sqlite3.Row
-        # Así podré acceder a las columnas por nombre (ej: row['ed2k_hash']) en lugar de por índice.
 
 
         # 1º. Creo la tabla si no existe.
@@ -159,7 +158,7 @@ class HashDatabase:
 
         # Consulta SQL que busca un archivo por su hash ED2K
         cursor = self._conn.execute( 
-            "SELECT * FROM hashes WHERE ed2k_hash = ?", # uso placeholder '?' para evitar inyección SQL
+            "SELECT * FROM files WHERE ed2k_hash = ?", # uso placeholder '?' para evitar inyección SQL
             (ed2k_hash,) # tupla de 1 elemento
         )
 
@@ -186,7 +185,7 @@ class HashDatabase:
 
         # Consulta SQL que busca un archivo por su huella digital y tamaño
         cursor = self._conn.execute(
-            "SELECT * FROM hashes WHERE fingerprint = ? AND file_size = ?",
+            "SELECT * FROM files WHERE fingerprint = ? AND file_size = ?",
             (fingerprint, file_size)
         )
 
@@ -219,10 +218,10 @@ class HashDatabase:
         # Uso ISO 8601 con la zona horaria local del usuario para el timestamp.
         processed_at = datetime.now().astimezone().isoformat()
 
-        # Consulta SQL que inserta o reemplaza un registro en la tabla 'hashes'
+        # Consulta SQL que inserta o reemplaza un registro en la tabla 'files'
         self._conn.execute(
             """
-            INSERT OR REPLACE INTO hashes
+            INSERT OR REPLACE INTO files
                 (file_path, file_name, file_size, fingerprint, file_mtime, ed2k_hash, ed2k_link, processed_at)
             VALUES
                 (?, ?, ?, ?, ?, ?, ?, ?)
@@ -271,7 +270,7 @@ class HashDatabase:
         
         # SQL con el operador REGEXP (habilitado por nuestra función personalizada)
         sql = """
-            SELECT * FROM hashes 
+            SELECT * FROM files 
             WHERE file_name REGEXP ? OR official_title REGEXP ?
             ORDER BY processed_at DESC
         """
@@ -289,7 +288,7 @@ class HashDatabase:
         """
         Elimina un registro de la base de datos por su ID único.
         """
-        self._conn.execute("DELETE FROM hashes WHERE id = ?", (record_id,))
+        self._conn.execute("DELETE FROM files WHERE id = ?", (record_id,))
         self._conn.commit()
         logger.debug(f"🔹  Registro {record_id} eliminado de la base de datos.")
 
@@ -303,6 +302,10 @@ class HashDatabase:
 
         # Extraigo los valores (values) del diccionario que devuelve el MetadataEngine
         api_data = metadata.get("api_data") or {}
+        
+        # Metadatos extraídos por el Parser (Regex o IA)
+        resolution = metadata.get("resolution", "")
+        languages = metadata.get("languages", "")
 
         # Extraigo los metadatos de las APIs:
 
@@ -321,6 +324,12 @@ class HashDatabase:
         # Tipo de archivo (película, serie, etc.)
         media_type = metadata.get("media_type", "unknown")
 
+        # Idiomas (Audio)
+        languages = metadata.get("languages", "")
+
+        # Subtítulos (VOSE, etc.)
+        subtitles = metadata.get("subtitles", "")
+
         # Veredicto de seguridad (Safe, Suspicious o Malicious)
         raw_verdict = api_data.get("veredicto", "")
 
@@ -334,18 +343,16 @@ class HashDatabase:
         # 1 si está organizado (tiene ruta final), 0 si no (no se ha movido o no se ha encontrado)
         is_organized = 1 if final_path else 0
 
-        # Cadena vacía ("") es el valor por defecto si no se encuentra el metadato
-
         # Actualizo el registro en la caché con los metadatos enriquecidos y la información del Organizador
         self._conn.execute(
             """
-            UPDATE hashes
+            UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                security_verdict=?, vt_url=?, final_path=?, is_organized=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
-             security_verdict, vt_url, final_path, is_organized, fingerprint, file_size)
+             resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, fingerprint, file_size)
         )
 
         # Uso el fingerprint (la huella SHA256) y el file_size en el WHERE. 
@@ -354,6 +361,46 @@ class HashDatabase:
         self._conn.commit() # Confirmo los cambios en la BBDD
 
         logger.debug(f"🔹  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
+
+
+    # Función para obtener todos los registros (para el flag --list)
+    def get_all_files(self) -> list[dict]:
+
+        """
+        Devuelve todos los archivos registrados en la base de datos, ordenados por fecha de procesamiento (los más recientes primero).
+        """
+
+        sql = "SELECT * FROM files ORDER BY processed_at DESC"
+        cursor = self._conn.execute(sql)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+    # Función para obtener estadísticas de la base de datos
+    def get_stats(self) -> dict:
+
+        """
+        Devuelve un resumen estadístico: total de archivos y conteo por categoría.
+        """
+        
+        stats = {
+            "total": 0,
+            "categories": {}
+        }
+
+        try:
+            # 1. Obtener total
+            cursor = self._conn.execute("SELECT COUNT(*) FROM files")
+            stats["total"] = cursor.fetchone()[0]
+
+            # 2. Obtener conteo por categoría
+            cursor = self._conn.execute("SELECT media_type, COUNT(*) FROM files GROUP BY media_type ORDER BY COUNT(*) DESC")
+            for row in cursor.fetchall():
+                stats["categories"][row[0]] = row[1]
+            
+        except Exception as e:
+            logger.error(f"❌  Error al obtener estadísticas de la BBDD: {e}")
+        
+        return stats
 
 
     # Función de cierre de la BBDD SQLite

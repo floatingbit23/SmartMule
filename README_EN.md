@@ -49,6 +49,21 @@ By default, eMule places all completed downloads into a single `Incoming` folder
 
 ---
 
+## 📂 Organization Strategies (`ORGANIZER_MODE`)
+
+SmartMule allows you to choose how files are physically managed via the `ORGANIZER_MODE` variable in the `.env` file:
+
+| Mode | Supports _Seeding_ (eMule) | Description |
+| :--- | :--- | :--- |
+| **`hardlink`** (_Default_) | ✅ **Yes** | Creates a physical link. The file appears in both `Incoming` and `Library` but **only consumes space once**. Perfect for continuous seeding while keeping your library organized. |
+| **`move`** | ❌ **No** | Moves the file from one folder to another. It is instantaneous, but eMule will stop sharing it as it won't find it in the original path. |
+| **`copy`** | ✅ **Yes** | Duplicates the file. It is the slowest mode and **consumes double the space**, but it is the only one that works across different physical hard drives. |
+
+> [!TIP]
+> Always use **`hardlink`** if `Incoming` and `Library` are on the same disk drive.
+
+---
+
 ## System Requirements
 
 ### 1. Python Dependencies
@@ -96,13 +111,19 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
 
 *   **Stop**: If you need to stop it, open any terminal (CMD or PowerShell) and run `python main.py stop`. SmartMule will detect the hidden process and close it cleanly.
 
-![stop_pid](/images/stop_pid.png)
+    ![stop_pid](/images/stop_pid.png)
 
 *   **Auditing**: All silent activity will be recorded in the `smartmule.log` file (in the project root). You can follow it in real-time in the terminal by running:
     ```powershell
     Get-Content smartmule.log -Wait -Encoding UTF8
     ```
-![alt text](/images/logs.png)
+    ![alt text](/images/logs.png)
+
+*   **Inventory and Statistics**: To quickly see which files are registered in the library and the breakdown by category (Movies, Books, etc.), use the `--list` flag:
+    ```bash
+    python main.py --list
+    ```
+    ![alt text](/images/inventory.png)
 
 ---
 

@@ -32,22 +32,34 @@ Ejemplo 3: "Manual_Usuario_SmartMule_v1.0_Final.doc"
 {"title": "Manual Usuario SmartMule v1.0 Final", "media_type": "documents", "season": null, "episode": null, "quality": null, "year": null}
 """
 
-# Función principal que decide si usar Gemini o LM Studio
-def parse_with_llm(filename: str) -> dict:
+# Función principal que recibe el nombre y opcionalmente contexto técnico de Regex
+def parse_with_llm(filename: str, context: dict = None) -> dict:
 
     """
     Intenta limpiar y extraer toda la informaición del archivo usando Inteligencia Artificial.
     Es el paso "Capa 2" de nuestro pipeline si Regex falla (baja confianza) o la entropia es alta.
+    Se le puede pasar un diccionario 'context' con datos ya extraídos por Regex para ayudar.
     """
+    
+    # Preparamos el mensaje adicional de contexto si existe
+    extra_context = ""
+    
+    if context:
+        # Filtra los campos que tengan valor
+        extracted = [f"{k}: {v}" for k, v in context.items() if v]
+        if extracted:
+            extra_context = f"\n\nContexto técnico ya detectado (ignora estos tags en el título): {', '.join(extracted)}"
+            # Ejemplo: "Contexto técnico ya detectado (ignora estos tags en el título): languages: [EN, ES], subtitles: [ES]"
 
-    if USE_LOCAL_LLM: # Si USE_LOCAL_LLM es True, llama a LM Studio
-        return _call_local_llm(filename)
-    else: # Si USE_LOCAL_LLM es False, llama a la API de Google Gemini
-        return _call_gemini(filename)
+    # Decidir si usar el LLM local o la API de Google
+    if USE_LOCAL_LLM: 
+        return _call_local_llm(filename, extra_context)
+    else: 
+        return _call_gemini(filename, extra_context)
 
 
-def _call_gemini(filename: str) -> dict:
-    """Llama a la nube usando Gemini 2.5 Flash (vía SDK google-genai)."""
+def _call_gemini(filename: str, extra_context: str = "") -> dict:
+    """Llama a la nube usando Gemini (vía SDK google-genai)."""
     
     if not GEMINI_API_KEY or GEMINI_API_KEY == "tu_gemini_api_key":
         logger.error("❌ GEMINI_API_KEY no encontrada. Por favor, revisa tu .env o habilita USE_LOCAL_LLM.")
@@ -61,11 +73,11 @@ def _call_gemini(filename: str) -> dict:
             # Iniciamos el cliente de la nueva librería google-genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             
-            # Inferencia con salida JSON forzada
+            # Inferencia con salida JSON forzada, incluyendo el contexto técnico si existe
             response = client.models.generate_content(
-                model='gemini-2.5-flash', # Modelo a usar
-                contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'", # Prompt + archivo a analizar
-                config={'response_mime_type': 'application/json'} # Forzamos la salida en JSON
+                model='gemini-2.5-flash', 
+                contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'{extra_context}", 
+                config={'response_mime_type': 'application/json'}
             )
             
             # Convertimos el string JSON a diccionario
@@ -88,7 +100,7 @@ def _call_gemini(filename: str) -> dict:
             return {"title": filename, "confidence": "failed", "error": error_msg}
 
 
-def _call_local_llm(filename: str) -> dict:
+def _call_local_llm(filename: str, extra_context: str = "") -> dict:
 
     """Llama al servidor local de inferencia (LM Studio)"""
     
@@ -103,7 +115,7 @@ def _call_local_llm(filename: str) -> dict:
             model="local-model", # LM Studio ignora el string e interroga al que tengas cargado.
             messages=[
                 # Fusionamos el System Prompt con el User Prompt para máxima compatibilidad
-                {"role": "user", "content": f"{SYSTEM_PROMPT}\n\nAnaliza este nombre de archivo: '{filename}'"}
+                {"role": "user", "content": f"{SYSTEM_PROMPT}\n\nAnaliza este nombre de archivo: '{filename}'{extra_context}"}
             ]
         )
         

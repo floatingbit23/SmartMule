@@ -51,6 +51,20 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
 
 ---
 
+### 📂 Estrategias de Organización (`ORGANIZER_MODE`)
+
+SmartMule permite elegir cómo se gestionan los archivos físicamente mediante la variable `ORGANIZER_MODE` en el archivo `.env`:
+
+| Modo | Soporta _Seeding_ (eMule) | Descripción |
+| :--- | :--- | :--- |
+| **`hardlink`** (Por defecto) | ✅ **Sí** | Crea un vínculo físico. El archivo aparece en `Incoming` y `Library` pero **solo ocupa espacio una vez**. Ideal para seguir compartiendo mientras mantienes tu biblioteca limpia. |
+| **`move`** | ❌ **No** | Mueve el archivo de una carpeta a otra. Es instantáneo pero eMule dejará de compartirlo al no encontrarlo en la ruta original. |
+| **`copy`** | ✅ **Sí** | Duplica el archivo. Es el más lento y **consume el doble de espacio**, pero es el único que funciona entre discos duros físicos distintos. |
+
+>[!TIP]
+> Usa **`hardlink`** siempre que `Incoming` y `Library` estén en el mismo disco duro.
+---
+
 ## 🛠️ Requisitos del Sistema
 
 ### 1. Dependencias de Python
@@ -98,13 +112,21 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
 
 *   **Detener**: Si necesitas pararlo, abre una terminal cualquiera (CMD o PowerShell) y ejecuta `python main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
 
-![stop_pid](/images/stop_pid.png)
+    ![stop_pid](/images/stop_pid.png)
 
 *   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log` (en la raíz del proyecto). Puedes seguirlo en tiempo real en la terminal ejecutando:
     ```powershell
     Get-Content smartmule.log -Wait -Encoding UTF8
     ```
-![alt text](/images/logs.png)
+
+    ![alt text](/images/logs.png)
+
+*   **Inventario y Estadísticas**: Para ver rápidamente qué archivos tienes registrados en la biblioteca y el desglose por categorías (Películas, Libros, etc.), usa la flag `--list`:
+    ```bash
+    python main.py --list
+    ```
+
+    ![alt text](/images/inventory.png)
  
 ---
 
