@@ -39,3 +39,9 @@ tmp/
 # Archivos de OS
 .DS_Store
 Thumbs.db
+
+# Warnings
+pytest.ini
+
+# Testing/Temporary Files
+tmp/

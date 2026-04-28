@@ -11,6 +11,7 @@ La base de datos (BBDD) es un archivo único ('smartmule.db') en la carpeta Libr
 No necesita un servidor, no tiene dependencias externas y se crea automáticamente si no existe. 
 """
 
+import re # Para el soporte de expresiones regulares en la búsqueda
 import sqlite3 
 import logging
 from datetime import datetime, timezone
@@ -96,6 +97,8 @@ class HashDatabase:
 
         # Abro la conexión con la BBDD SQLite.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.create_function("REGEXP", 2, self._regexp_worker)
 
         # 'check_same_thread=False' es necesario porque la BBDD 
         # es instanciada en el Main Thread (QueueManager._db) pero usada en el Worker Thread (_worker_loop._process_file._db.save())
@@ -127,6 +130,19 @@ class HashDatabase:
 
         logger.debug(f"🔹  Base de datos SQLite abierta en: {db_path}")
 
+
+    def _regexp_worker(self, expr: str, item: str) -> bool:
+        """
+        Función auxiliar que ejecuta la lógica de búsqueda regex.
+        SQLite llama a esta función por cada fila cuando usamos 'WHERE col REGEXP ?'.
+        """
+        if item is None:
+            return False
+        try:
+            # Uso re.IGNORECASE para que no importe si escribes en mayúsculas o minúsculas.
+            return re.search(expr, item, re.IGNORECASE) is not None
+        except Exception:
+            return False
 
     # Función de búsqueda por hash ED2K
     def get_by_hash(self, ed2k_hash: str) -> Optional[dict]:
@@ -226,6 +242,56 @@ class HashDatabase:
         self._conn.commit()
 
         logger.debug(f"🔹  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
+
+
+    # Función de búsqueda por nombre (para el comando purge)
+    def search_by_name(self, query: str) -> list[dict]:
+        """
+        Busca registros cuyos nombres de archivo o títulos oficiales coincidan con la consulta.
+        Soporta wildcards estilo shell (N*) y expresiones regulares (re).
+        """
+        regex_pattern = query
+        
+        # --- INTELIGENCIA DE BÚSQUEDA ---
+        # Si el usuario usa '*' o '?', intentamos ser inteligentes.
+        # Pero solo si NO parece una expresión regular compleja (que ya traiga +, [, ], etc.)
+        regex_chars = ['+', '[', ']', '(', ')', '{', '}', '$', '^']
+        has_regex_markers = any(c in query for c in regex_chars)
+
+        if ("*" in query or "?" in query) and not has_regex_markers:
+            # Es un patrón simple de "wildcard" (estilo shell).
+            # Escapamos caracteres especiales pero convertimos los wildcards:
+            # '*' -> '.*' (cualquier cosa)
+            # '?' -> '.'  (un carácter)
+            regex_pattern = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
+            
+            # Si el patrón no empieza por wildcard, anclamos al principio para que "N*" sea "Empieza por N"
+            if not query.startswith("*") and not regex_pattern.startswith("^"):
+                regex_pattern = "^" + regex_pattern
+        
+        # SQL con el operador REGEXP (habilitado por nuestra función personalizada)
+        sql = """
+            SELECT * FROM hashes 
+            WHERE file_name REGEXP ? OR official_title REGEXP ?
+            ORDER BY processed_at DESC
+        """
+        
+        try:
+            cursor = self._conn.execute(sql, (regex_pattern, regex_pattern))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"❌  Error en búsqueda Regex/Wildcard '{query}': {e}")
+            return []
+
+
+    # Función para eliminar un registro por ID
+    def delete_by_id(self, record_id: int) -> None:
+        """
+        Elimina un registro de la base de datos por su ID único.
+        """
+        self._conn.execute("DELETE FROM hashes WHERE id = ?", (record_id,))
+        self._conn.commit()
+        logger.debug(f"🔹  Registro {record_id} eliminado de la base de datos.")
 
 
     # Función de actualización de metadatos

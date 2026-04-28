@@ -106,6 +106,40 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
 
 ---
 
+## Maintenance and Purge (_Smart Deletion_)
+
+_When using `hardlink` mode (default), deleting a file from your library does not physically delete it from the disk if it still exists in the `Incoming` folder (and vice versa). This is necessary for continuous seeding as a good eMule peer but can be tedious to clean up_. 
+
+To facilitate complete cleanup, SmartMule includes a purge command:
+
+*   **Selective Purge**: Search for files by name, _Wildcards_, or _Regex_.
+    ```bash
+    python main.py --purge "name*"     # Finds files starting with "name"
+    python main.py --purge ".*\.mkv$"  # Finds all .mkv files
+    ```
+
+*   **Interactive Explorer**: If you run the command without search terms, SmartMule will display the full list of your library for you to choose what to delete.
+    ```bash
+    python main.py --purge
+    ```
+
+Use example:
+![alt text](images/purge.png)
+
+*   **Destructive Mode (Total Wipeout)**: ⚠️⚠️ Deletes absolutely every file registered in the database in one go.
+    ```bash
+    python main.py --purge --all --no-preserve
+    ```
+    *Note: This command requires a text confirmation ("BORRAR TODO") for safety.*
+
+### 🚀 One-Click Purge (Windows)
+For extra convenience, SmartMule automatically deploys a tool called **`Purga_Interactiva.bat`** inside your library folder (`LIBRARY_PATH`). 
+
+Just double-click it to search and delete files without having to open the terminal or remember CLI commands:
+![alt text](images/purge_script.png)
+
+---
+
 ## eMule Configuration (IMPORTANT)
 
 To maintain visibility on the network and continue earning credits after organizing your files, follow these steps:

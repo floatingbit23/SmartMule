@@ -105,6 +105,40 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
     Get-Content smartmule.log -Wait -Encoding UTF8
     ```
 ![alt text](/images/logs.png)
+ 
+---
+
+## Mantenimiento y Purga (_Smart Deletion_)
+
+_Cuando usas el modo `hardlink` (predeterminado), borrar un archivo de tu biblioteca no lo borra físicamente del disco si aún existe en la carpeta `Incoming` (y viceversa). Esto es necesario para seguir compartiendo como cliente eMule (y ganar créditos en la red), pero puede ser tedioso de limpiar_. 
+
+Para facilitar la limpieza total, SmartMule incluye un comando de purga/eliminación de archivos:
+
+*   **Purga Selectiva**: Busca archivos por nombre, comodines (_Wildcards_) o expresiones regulares (_Regex_). 
+    ```bash
+    python main.py --purge "nombre*"  # Encuentra archivos que empiecen por "nombre"
+    python main.py --purge ".*\.mkv$" # Encuentra todos los archivos con extensión .mkv
+    ```
+
+*   **Explorador Interactivo**: Si ejecutas el comando sin términos de búsqueda, SmartMule te mostrará la lista completa de tu biblioteca para que elijas qué eliminar.
+    ```bash
+    python main.py --purge
+    ```
+
+Ejemplo de uso:
+![alt text](images/purge.png)
+
+*   **Modo Destructivo (Limpieza Total)**: ⚠️⚠️ Borra absolutamente todos los archivos registrados en la base de datos de un solo golpe.
+    ```bash
+    python main.py --purge --all --no-preserve
+    ```
+    *Nota: Este comando requiere una confirmación de texto (escribir "BORRAR TODO") por seguridad.*
+
+### 🚀 Purga en un solo clic (Windows)
+Para mayor comodidad, SmartMule despliega automáticamente una herramienta llamada **`Purga_Interactiva.bat`** dentro de tu carpeta de biblioteca (`LIBRARY_PATH`). 
+
+Solo tienes que hacer doble clic en ella para buscar y eliminar archivos sin tener que abrir la terminal ni recordar comandos:
+![alt text](images/purge_script.png)
 
 ---
 

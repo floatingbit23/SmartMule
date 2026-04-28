@@ -141,7 +141,7 @@ class IncomingHandler(FileSystemEventHandler):
             event: Evento de movimiento con src_path (origen) y dest_path (destino).
         """
         # Identificamos el ítem de nivel superior en Incoming
-        top_level_item = self._get_top_level_item(dest_path)
+        top_level_item = self._get_top_level_item(event.dest_path)
         if top_level_item:
             logger.debug(f"Ítem movido/renombrado en Incoming: {top_level_item.name}")
             self._reset_timer(top_level_item)

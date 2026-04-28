@@ -29,6 +29,9 @@ INCOMING_PATH: Path = Path(os.getenv("INCOMING_PATH", r"C:\Users\Javi\eMule\Inco
 # Está en la misma partición que Incoming, así que puedo hacer os.rename() atómico
 LIBRARY_PATH: Path = Path(os.getenv("LIBRARY_PATH", r"C:\Users\Javi\eMule\SmartMule\Library"))
 
+# Ruta raíz del proyecto (donde vive main.py)
+PROJECT_PATH: Path = Path(os.getenv("PROJECT_PATH", str(BASE_DIR)))
+
 # === Parámetros del hashing ED2K ===
 
 # Tamaño de bloque del algoritmo ED2K (estándar fijo, NO configurable por el usuario).

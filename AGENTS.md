@@ -78,6 +78,13 @@ Tests are located in `/tests` and use mock objects for external APIs and file sy
 - **Start**: Run `python main.py start` (standard) or `smartmule_launcher.vbs` (invisible).
 - **Stop**: Run `python main.py stop`. This looks for the persistent PID and shuts down the watcher cleanly.
 
+### How to Purge/Delete Files
+Use the purge command to delete files from both `Incoming` and `Library` folders simultaneously.
+- **Search & Destroy**: `python main.py --purge "search_term"`.
+- **Wipe Everything**: `python main.py --purge --all --no-preserve`. This requires a manual string confirmation ("BORRAR TODO").
+
+- **Special Note on Hardlinks**: When using `hardlink` mode (default), files exist in both locations. The purge command removes them from both locations and the database.
+
 ### How to Add a New Category
 1. Add classification logic to `smartmule/metadata_engine.py`.
 2. Define the folder structure in `smartmule/organizer.py`.
