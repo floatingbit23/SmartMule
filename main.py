@@ -111,16 +111,30 @@ def stop_daemon():
 
 def setup_io_priority() -> None:
     """
-    Configura el proceso para que use prioridad de entrada/salida mínima.
-    Esto evita que SmartMule ralentice el PC mientras eMule o el usuario hacen uso intenso del disco duro.
+    Configura el proceso para que sea 'invisible':
+    1. Prioridad de I/O mínima (para no ralentizar el disco).
+    2. Prioridad de CPU mínima (para no ralentizar otras aplicaciones).
     """
     try:
         process = psutil.Process(os.getpid())
-        # Prioridad 'Very Low' en Windows (IOPRIO_VERYLOW)
-        process.ionice(psutil.IOPRIO_VERYLOW)
-        logger.info("✅  Prioridad de I/O [VERY_LOW] establecida exitosamente.")
+        
+        # 1. Prioridad de DISCO (I/O) -> IOPRIO_VERYLOW: Prioridad mínima, el proceso solo accederá al disco cuando sea estrictamente necesario
+        if sys.platform == "win32":
+            process.ionice(psutil.IOPRIO_VERYLOW)
+        else:
+            # En Linux se usa el valor 3 (Idle) para ionice
+            process.ionice(psutil.IOPRIO_CLASS_IDLE)
+        
+        # 2. Prioridad de CPU -> IDLE_PRIORITY_CLASS: El proceso corre cuando el sistema está inactivo
+        if sys.platform == "win32":
+            process.nice(psutil.IDLE_PRIORITY_CLASS)
+        else:
+            # En Linux/Unix, "nice 19" es la prioridad más baja
+            process.nice(19)
+
+        logger.info("✅  Cortesía de sistema establecida: Prioridad de I/O y CPU establecidas al mínimo.")
     except Exception as e:
-        logger.warning(f"⚠️  No pude establecer la prioridad de I/O: {e}")
+        logger.warning(f"⚠️  No pude establecer la cortesía total de recursos: {e}")
 
 
 def purge_files(query: str, select_all: bool = False, no_preserve: bool = False) -> None:

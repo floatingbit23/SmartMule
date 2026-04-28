@@ -51,6 +51,12 @@ Copy `.env.example` to `.env` and configure paths and API keys.
 ### Key Logic: Tie-Breaking
 When an LLM provides multiple matches for a title, SmartMule uses `ffprobe` to compare file duration against TMDB data to select the correct production.
 
+### Key Logic: Parallel Hashing (Performance)
+The ED2K hashing in `smartmule/hasher.py` uses a hybrid model:
+- **Sequential Reader**: Single-thread reads from disk to respect HDDs and `IOPRIO_VERYLOW`.
+- **Parallel Workers**: `ThreadPoolExecutor` handles MD4 chunk calculations.
+- **Backpressure**: The reader pauses if the thread pool buffer is full to prevent RAM exhaustion.
+
 ---
 
 ## 🧪 Testing & Validation

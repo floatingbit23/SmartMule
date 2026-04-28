@@ -453,8 +453,8 @@ class QueueManager:
 
         logger.info(f"🔹  Iniciando orquestación de metadatos (Regex -> IA -> API -> Antimalware)...")
 
-        engine = MetadataEngine() # Instancio el motor de metadatos
-        metadata_dict = engine.identify_file(file_name, str(file_path))  # Pipeline completo de metadatos
+        engine = MetadataEngine(db=self._db) # Instancio el motor de metadatos con la BBDD
+        metadata_dict = engine.identify_file(file_name, str(file_path), ed2k_hash=ed2k_hash)  # Pipeline completo de metadatos
         
         # === FASE 5: Organización en Disco ===
         

@@ -25,8 +25,9 @@ class MetadataEngine:
     """
     
     # Constructor de la clase MetadataEngine
-    def __init__(self):
+    def __init__(self, db=None):
 
+        self.db = db # Instancia de HashDatabase (opcional, inyectada por QueueManager)
         self.tmdb = TMDBClient() # Instancio la clase TMDBClient
         self.openlibrary = OpenLibraryClient() # Instancio la clase OpenLibraryClient
         self.musicbrainz = MusicBrainzClient() # Instancio la clase MusicBrainzClient
@@ -34,10 +35,11 @@ class MetadataEngine:
 
 
     # Método para identificar el archivo o carpeta
-    def identify_file(self, filename: str, filepath: str = None) -> dict:
+    def identify_file(self, filename: str, filepath: str = None, ed2k_hash: str = None) -> dict:
         """
         Orquestación de la identificación: Regex -> Análisis IA -> API.
         Ahora soporta carpetas buscando un archivo representante.
+        Si se proporciona ed2k_hash y BBDD, verifica la caché antes de gastar recursos de API.
         """
 
         item_path = Path(filepath) if filepath else Path(filename)
@@ -66,9 +68,17 @@ class MetadataEngine:
                 technical_target = filepath
                 logger.warning(f"⚠️  No se encontró un archivo multimedia claro en la carpeta {display_name}")
         else:
-            technical_target = filepath
+            technical_target = filepath or filename
 
         logger.info(f"🔍  Identificando archivo [{filename}]...")
+        
+        # --- CACHÉ DE BÚSQUEDAS (API Optimization) ---
+        if self.db and ed2k_hash:
+            cached_data = self.db.get_metadata_cache(ed2k_hash)
+            if cached_data:
+                # Si se encuentra en la caché, se devuelve directamente sin ejecutar Capa 1 (Regex) ni Capa 2 (IA)
+                logger.info(f"⚡ ¡Caché Hit! Metadatos recuperados instantáneamente para {ed2k_hash[:8]}...")
+                return cached_data
         
         # ================= CAPA 1: Regex Simple =================
         
@@ -442,8 +452,13 @@ class MetadataEngine:
         else:
             logger.info("⚠️  No se obtuvieron metadatos oficiales de las APIs.")
 
+        # Guardamos en caché si tenemos la instancia de BD y el hash (para el futuro)
+        if self.db and ed2k_hash:
+            self.db.set_metadata_cache(ed2k_hash, data)
+
         # Devolvemos el diccionario final con toda la información recopilada
         return data
+
 
 
 

@@ -63,6 +63,17 @@ class HashDatabase:
         );
     """
 
+    # Tabla para la Caché de Búsquedas LLM (Optimización de API)
+    # Almacena de forma persistente los metadatos completos asociados a un hash ED2K.
+    _CREATE_CACHE_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS metadata_cache (
+            ed2k_hash    TEXT PRIMARY KEY, -- Hash único del archivo
+            metadata     TEXT NOT NULL,    -- JSON con el resultado del análisis (IA + API)
+            cached_at    TEXT NOT NULL     -- Fecha en la que se cacheó
+        );
+    """
+
+
     # Migraciones para añadir columnas a bases de datos antiguas de forma segura
     _MIGRATIONS = [
         "ALTER TABLE files ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
@@ -107,8 +118,9 @@ class HashDatabase:
         self._conn.create_function("REGEXP", 2, self._regexp_worker)
 
 
-        # 1º. Creo la tabla si no existe.
+        # 1º. Creo las tablas si no existen.
         self._conn.execute(self._CREATE_TABLE_SQL)
+        self._conn.execute(self._CREATE_CACHE_TABLE_SQL)
         
 
         # 2º. MIGRACIONES: Aseguro que las columnas necesarias existan antes de indexar
@@ -401,6 +413,45 @@ class HashDatabase:
             logger.error(f"❌  Error al obtener estadísticas de la BBDD: {e}")
         
         return stats
+
+
+    # --- MÉTODOS DE CACHÉ DE LLM ---
+    def get_metadata_cache(self, ed2k_hash: str) -> Optional[dict]:
+        """Recupera los metadatos parseados previamente para un hash ED2K."""
+        if not ed2k_hash:
+            return None
+            
+        sql = "SELECT metadata FROM metadata_cache WHERE ed2k_hash = ?"
+        cursor = self._conn.execute(sql, (ed2k_hash,))
+        row = cursor.fetchone()
+        
+        if row:
+            import json
+            try:
+                return json.loads(row['metadata'])
+            except Exception as e:
+                logger.error(f"❌  Error parseando JSON de caché para hash {ed2k_hash}: {e}")
+                return None
+        return None
+
+    def set_metadata_cache(self, ed2k_hash: str, metadata_dict: dict) -> None:
+        """Guarda permanentemente el resultado del análisis (IA+API) para un hash."""
+        if not ed2k_hash or not metadata_dict:
+            return
+            
+        import json
+        sql = """
+            INSERT OR REPLACE INTO metadata_cache (ed2k_hash, metadata, cached_at)
+            VALUES (?, ?, ?)
+        """
+        now_str = datetime.now(timezone.utc).isoformat()
+        try:
+            metadata_json = json.dumps(metadata_dict)
+            self._conn.execute(sql, (ed2k_hash, metadata_json, now_str))
+            self._conn.commit()
+            logger.debug(f"💾 Metadatos cacheados para hash {ed2k_hash}")
+        except Exception as e:
+            logger.error(f"❌  Error guardando en metadata_cache para {ed2k_hash}: {e}")
 
 
     # Función de cierre de la BBDD SQLite

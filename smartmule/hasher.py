@@ -24,6 +24,8 @@ import hashlib
 import logging
 import time
 import threading
+import os
+import concurrent.futures
 from typing import Optional
 from pathlib import Path
 
@@ -33,6 +35,12 @@ from smartmule.config import ED2K_CHUNK_SIZE, IGNORED_EXTENSIONS # ED2K_CHUNK_SI
 
 # Creo un logger específico para este módulo.
 logger = logging.getLogger("SmartMule.hasher")
+
+# Función de ayuda para el pool de procesos (debe estar fuera de la clase/función principal)
+def _calculate_md4_chunk(chunk: bytes) -> bytes:
+    """Calcula el MD4 de un bloque. Se ejecuta en un hilo del pool."""
+    from Crypto.Hash import MD4
+    return MD4.new(chunk).digest()
 
 # Función que calcula el hash ED2K de un archivo
 def calculate_ed2k(path: Path) -> str:
@@ -57,7 +65,7 @@ def calculate_ed2k(path: Path) -> str:
         
         if not main_file:
             return MD4.new(b"").hexdigest().upper() # Carpeta vacía o sin archivos legibles
-        logger.info(f"📁  Directorio detectado. Usando archivo principal {main_file.name} para cálculo de hash ED2K...")
+        logger.info(f"[i] Directorio detectado. Usando archivo principal {main_file.name} para cálculo de hash ED2K...")
         file_to_hash = main_file
 
     else:
@@ -82,11 +90,16 @@ def calculate_ed2k(path: Path) -> str:
         # y que el tiempo se actualice en la misma línea sin saltar a la siguiente.
         # \033[97m es el blanco para hasher. \033[0m es el reset.
         now = time.strftime("%H:%M:%S")
-        output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m]  🔹  Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
+        output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m] [i] Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
         
         if sys.stdout:
-            sys.stdout.write(output)
-            sys.stdout.flush()
+            try:
+                sys.stdout.write(output)
+                sys.stdout.flush()
+            except UnicodeEncodeError:
+                # Si el terminal no soporta Unicode, enviamos una versión simplificada
+                sys.stdout.write(f"\r{now}  INFO     [SmartMule.hasher]  [i] Calculando hash ED2K... ({elapsed_str})")
+                sys.stdout.flush()
 
         # Me reprogramo para el siguiente log en 2 segundos
         t = threading.Timer(2.0, _log_progress)
@@ -105,42 +118,56 @@ def calculate_ed2k(path: Path) -> str:
     first_timer.start() # Inicio el primer timer
 
     try:
+        chunk_hashes: list[bytes] = []
+        
+        # Usamos la mitad de los núcleos para ser verdaderamente "poco invasivos"
+        cpu_count = os.cpu_count() or 1
+        max_workers = max(1, cpu_count // 2)
+        
+        # Limitamos cuántos bloques de 9.28MB pueden estar en memoria esperando a ser procesados.
+        # Un valor de max_workers * 2 es un buen compromiso entre velocidad y RAM.
+        max_pending = max_workers * 2
 
-        chunk_hashes: list[bytes] = [] # Lista para guardar los hashes de cada bloque
+        with open(file_to_hash, "rb") as f:
 
-        with open(file_to_hash, "rb") as f: # Abro el archivo en modo lectura binaria
+            """
+            Usamos ThreadPoolExecutor. Es mucho más rápido que procesos para bloques grandes
+            porque evita el coste de copiar/serializar datos entre procesos -> IPC (Inter-Process Communication) Overhead.
+            """
 
-            while True: # Bucle infinito
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                
+                futures = []
+                
+                while True:
+                    # Si ya tenemos demasiados bloques en memoria esperando, pausamos la lectura
+                    if len(futures) >= max_pending:
+                        # Esperamos a que el primer bloque enviado termine para liberar espacio en el buffer
+                        chunk_hashes.append(futures.pop(0).result())
+                        continue
 
-                # Leo exactamente un bloque (chunk) de ED2K_CHUNK_SIZE bytes.
-                # La lectura por búfer garantiza que nunca cargo más de ~9.28 MB en RAM.
-                chunk = f.read(ED2K_CHUNK_SIZE)
+                    chunk = f.read(ED2K_CHUNK_SIZE)
+                    
+                    if not chunk:
+                        break # Fin del archivo
+                    
+                    # Enviamos el bloque al pool de hilos
+                    futures.append(executor.submit(_calculate_md4_chunk, chunk))
 
-                # Si el chunk está vacío, he llegado al final del archivo.
-                if not chunk:
-                    break # Rompo el bucle
+                # Esperamos a que terminen los últimos bloques
+                for fut in futures:
+                    chunk_hashes.append(fut.result())
 
-                # Calculo el MD4 de este bloque y guardo el digest en bytes (no en formato hexadecimal) 
-                # porque necesito concatenarlos para calcular el hash final.
-
-                chunk_hashes.append(MD4.new(chunk).digest())  # 16 bytes (en binario) por cada chunk, añadidos a la lista
-
-        # Calculo el hash final según el estándar ED2K:
-        if len(chunk_hashes) == 0:
-            # Caso especial: archivo vacío.
-            # El MD4 de una cadena vacía es un valor conocido.
+        # Cálculo final según el estándar ED2K
+        if not chunk_hashes:
             return MD4.new(b"").hexdigest().upper()
 
-        elif len(chunk_hashes) == 1:
-            # Caso especial: archivo pequeño (un solo bloque).
-            # El hash ED2K es directamente el MD4 del bloque único.
+        if len(chunk_hashes) == 1:
             return chunk_hashes[0].hex().upper()
 
-        else:
-            # Caso general: múltiples bloques.
-            # Concateno todos los MD4s en binario y calculo el MD4 de esa concatenación.
-            all_hashes_concatenated = b"".join(chunk_hashes) # Concateno todos los MD4s en binario
-            return MD4.new(all_hashes_concatenated).hexdigest().upper() # Calculo el MD4 de esa concatenación
+        # Concatenación y hash final (paso jerárquico)
+        all_hashes_concatenated = b"".join(chunk_hashes)
+        return MD4.new(all_hashes_concatenated).hexdigest().upper()
 
     finally:
         # Me aseguro de cancelar el timer de progreso pase lo que pase (éxito o error).
@@ -227,7 +254,7 @@ def calculate_fingerprint(path: Path, file_size: int) -> str:
         return sha.hexdigest().upper() # Devuelvo el hash en formato hexadecimal y en mayúsculas
 
     except (OSError, IOError) as e:
-        logger.error(f"❌ Error al calcular fingerprint de {path.name}: {e}")
+        logger.error(f"[!] Error al calcular fingerprint de {path.name}: {e}")
         return "" 
 
 
