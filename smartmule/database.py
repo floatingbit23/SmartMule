@@ -258,23 +258,28 @@ class HashDatabase:
 
     # Función de búsqueda por nombre (para el comando purge)
     def search_by_name(self, query: str) -> list[dict]:
+
         """
         Busca registros cuyos nombres de archivo o títulos oficiales coincidan con la consulta.
         Soporta wildcards estilo shell (N*) y expresiones regulares (re).
         """
+
+        # Procesamos el término de búsqueda.
         regex_pattern = query
-        
+
         # --- INTELIGENCIA DE BÚSQUEDA ---
-        # Si el usuario usa '*' o '?', intentamos ser inteligentes.
+        # Si el usuario usa '*' o '?', convertimos a regex.
         # Pero solo si NO parece una expresión regular compleja (que ya traiga +, [, ], etc.)
         regex_chars = ['+', '[', ']', '(', ')', '{', '}', '$', '^']
         has_regex_markers = any(c in query for c in regex_chars)
 
         if ("*" in query or "?" in query) and not has_regex_markers:
+
             # Es un patrón simple de "wildcard" (estilo shell).
             # Escapamos caracteres especiales pero convertimos los wildcards:
             # '*' -> '.*' (cualquier cosa)
             # '?' -> '.'  (un carácter)
+
             regex_pattern = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
             
             # Si el patrón no empieza por wildcard, anclamos al principio para que "N*" sea "Empieza por N"
@@ -316,9 +321,8 @@ class HashDatabase:
         # Extraigo los valores (values) del diccionario que devuelve el MetadataEngine
         api_data = metadata.get("api_data") or {}
         
-        # Metadatos extraídos por el Parser (Regex o IA)
+        # Metadatos técnicos extraídos por el Parser (Regex o IA)
         resolution = metadata.get("resolution", "")
-        languages = metadata.get("languages", "")
 
         # Extraigo los metadatos de las APIs:
 
@@ -346,9 +350,10 @@ class HashDatabase:
         # Veredicto de seguridad (Safe, Suspicious o Malicious)
         raw_verdict = api_data.get("veredicto", "")
 
-        # Limpiamos códigos de colores ANSI para que la BBDD guarde texto plano y no BLOBs
+        # Limpiamos códigos de colores ANSI (utilizando la secuencia hex \x1b para ESC)
+        # Esto asegura que la base de datos guarde solo texto plano sin caracteres de control de consola.
         import re
-        security_verdict = re.sub(r'\033\[[0-9;]*m', '', raw_verdict)
+        security_verdict = re.sub(r'\x1b\[[0-9;]*m', '', raw_verdict)
         
         # URL del informe de VirusTotal
         vt_url = api_data.get("url", "")

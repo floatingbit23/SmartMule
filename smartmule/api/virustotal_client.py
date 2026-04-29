@@ -43,25 +43,31 @@ class VirusTotalClient:
 
 
     # Método para calcular el hash SHA-256 de un archivo
-    def _calculate_sha256(self, filepath: str) -> str:
-
-        """Calcula el hash SHA-256 de un archivo físico por chunks para no colapsar la RAM."""
+    def _calculate_sha256(self, filepath: str) -> Optional[str]:
+        """
+        Calcula el hash SHA-256 de un archivo físico por chunks para no colapsar la RAM.
+        Devuelve el hash en formato hexadecimal o None si ocurre un error de lectura.
+        """
         
-        # Inicializa el objeto hash
+        # Inicializa el objeto hash de la librería estándar hashlib
         sha256_hash = hashlib.sha256()
 
         try:
+            # Abrimos el archivo en modo lectura binaria (rb) para procesar sus bytes
+            with open(filepath, "rb") as f:
 
-            with open(filepath, "rb") as f: # Abre el archivo en modo lectura binaria
-
-                # Lee el archivo en bloques de 4K para no saturar la RAM
+                # Leemos el archivo en bloques de 4K (4096 bytes) para no saturar la memoria RAM.
+                # iter(lambda: f.read(4096), b"") lee bloques hasta encontrar el final del archivo (b"").
                 for byte_block in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(byte_block)
 
+            # Retornamos el hash calculado en formato hexadecimal legible
             return sha256_hash.hexdigest()
 
         except OSError as e:
+            # Capturamos errores de sistema (archivo no encontrado, permisos, etc.)
             logger.error(f"❌ Error leyendo archivo para calcular SHA-256: {e}")
+            # Retornamos None para señalizar que el cálculo no fue posible
             return None
 
 

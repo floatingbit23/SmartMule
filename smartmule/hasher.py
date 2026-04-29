@@ -43,150 +43,159 @@ def _calculate_md4_chunk(chunk: bytes) -> bytes:
     return MD4.new(chunk).digest()
 
 # Función que calcula el hash ED2K de un archivo
+def _get_file_to_hash(path: Path) -> Optional[Path]:
+
+    """Determina qué archivo procesar (el propio archivo o el más grande de una carpeta)."""
+
+    # Si no es una carpeta, es un archivo y salimos
+    if not path.is_dir():
+        return path
+
+    # Si es una carpeta, busco el archivo principal. Si no existe, salimos.
+    main_file = get_main_file_in_dir(path)
+    if not main_file:
+        return None
+        
+    logger.info(f"[i] Directorio detectado. Usando archivo principal {main_file.name} para cálculo de hash ED2K...")
+    return main_file
+
+def _process_file_in_parallel(file_path: Path) -> list[bytes]:
+
+    """Lee el archivo y calcula los hashes MD4 de cada bloque de 9.28MB en paralelo."""
+
+    from Crypto.Hash import MD4
+    chunk_hashes: list[bytes] = [] # Lista para almacenar los hashes MD4 de cada bloque
+
+    # Configuración de paralelismo conservador
+    cpu_count = os.cpu_count() or 1 # Número de núcleos de la CPU
+    max_workers = max(1, cpu_count // 2) # Número de hilos para el pool de procesos
+    max_pending = max_workers * 2 # Número máximo de bloques pendientes
+
+    # Ejemplo: si la CPU tiene 8 núcleos, se usarán 4 hilos para calcular hashes y se mantendrán 8 bloques de 9.28MB (aprox. 74MB) en memoria como máximo
+
+    with open(file_path, "rb") as f:
+        # Uso ThreadPoolExecutor para calcular hashes en paralelo, con un máximo de hilos y bloques pendientes
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+
+            futures = [] # Lista para almacenar las tareas pendientes
+
+            while True:
+
+                # Control de flujo para no saturar la RAM con bloques pendientes
+                # Se procesa el resultado del bloque más antiguo si se alcanza el límite de bloques pendientes
+                if len(futures) >= max_pending:
+                    chunk_hashes.append(futures.pop(0).result()) # Espera a que termine el primer bloque y lo añade a la lista
+                    continue # Vuelve al inicio del bucle para procesar el siguiente bloque
+
+                chunk = f.read(ED2K_CHUNK_SIZE) # Lee el siguiente bloque de 9.28MB
+
+                # Si no hay más bloques para procesar, salimos del bucle
+                if not chunk:
+                    break
+                
+                futures.append(executor.submit(_calculate_md4_chunk, chunk)) # Envía el bloque a calcular al pool de hilos
+
+            # Procesamos los resultados restantes
+            for fut in futures:
+                chunk_hashes.append(fut.result()) # Espera a que termine el bloque y lo añade a la lista
+                
+    return chunk_hashes # Lista de hashes MD4 de cada bloque de 9.28MB
+
+def _finalize_ed2k_hash(chunk_hashes: list[bytes]) -> str:
+
+    """Calcula el hash final concatenando los hashes de los bloques según el estándar ED2K."""
+
+    from Crypto.Hash import MD4
+    
+    # Caso especial: Si no hay bloques (archivo vacío), se devuelve un hash vacío
+    if not chunk_hashes:
+        return MD4.new(b"").hexdigest().upper()
+
+    # Caso especial: Si solo hay un bloque (archivo de <9.28MB), se devuelve su hash
+    if len(chunk_hashes) == 1:
+        return chunk_hashes[0].hex().upper()
+
+    # Hash jerárquico: hash del MD4 de la concatenación de todos los hashes de bloque
+    all_hashes_concatenated = b"".join(chunk_hashes) # Concatenación de todos los hashes MD4 de cada bloque
+    return MD4.new(all_hashes_concatenated).hexdigest().upper() # Hash final del MD4 de la concatenación
+
 def calculate_ed2k(path: Path) -> str:
 
     """
-    Calculo el hash ED2K de un ítem (archivo o carpeta).
-    
-    - Si es archivo: lectura por búferes de ED2K_CHUNK_SIZE bytes.
-    - Si es carpeta: busco el archivo más grande en su interior (el 'main file') y lo hasheo.
-
-    Args:
-        path: Ruta al archivo o carpeta cuyo hash quiero calcular.
-
-    Returns:
-        Hash ED2K como string hexadecimal de 32 caracteres (128 bits).
+    Orquestador del cálculo de hash ED2K. Soporta archivos y carpetas (usa el archivo principal en este último caso).
+    Implementa un log de progreso persistente en la terminal.
     """
 
-    # Si es una carpeta, delegamos en el archivo más grande que contenga
-    if path.is_dir():
+    from Crypto.Hash import MD4
+    
+    file_to_hash = _get_file_to_hash(path) # Determina qué archivo procesar
 
-        main_file = get_main_file_in_dir(path)
-        
-        if not main_file:
-            return MD4.new(b"").hexdigest().upper() # Carpeta vacía o sin archivos legibles
-        logger.info(f"[i] Directorio detectado. Usando archivo principal {main_file.name} para cálculo de hash ED2K...")
-        file_to_hash = main_file
+    if not file_to_hash: # Si no hay archivo, devuelve un hash vacío
+        return MD4.new(b"").hexdigest().upper()
 
-    else:
-        file_to_hash = path # Si no es una carpeta, es un archivo
+    start_time = time.time() # Tiempo inicial para el cálculo del hash ED2K
+    timer_ref: list[threading.Timer] = [] # Lista para almacenar los timers de progreso
 
-    # Inicio el timer de progreso que informará cada 2s si el cálculo tarda
-    start_time = time.time()
-
-    # Lista para poder cancelar el timer desde el closure
-    timer_ref: list[threading.Timer] = []
-
-    # Función interna que se ejecutará cada 2 segundos para informar del progreso
     def _log_progress():
 
-        """Actualizo el tiempo transcurrido en la misma línea de la terminal para no saturar los logs."""
+        """Función interna para informar del progreso cada 2 segundos en la misma línea."""
 
         elapsed = time.time() - start_time
         mins, secs = divmod(int(elapsed), 60)
         elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
-
-        # Reconstruyo el formato del log manualmente para poder usar '\r' (retorno de carro)
-        # y que el tiempo se actualice en la misma línea sin saltar a la siguiente.
-        # \033[97m es el blanco para hasher. \033[0m es el reset.
         now = time.strftime("%H:%M:%S")
-        output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m] [i] Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
         
+        # Formato ANSI para la terminal
+        output = f"\r{now}  INFO     [\033[97mSmartMule.hasher\033[0m] [i] Calculando hash ED2K... ({elapsed_str} transcurrido(s))"
+
+        
+        # Imprime el progreso
         if sys.stdout:
             try:
                 sys.stdout.write(output)
                 sys.stdout.flush()
             except UnicodeEncodeError:
-                # Si el terminal no soporta Unicode, enviamos una versión simplificada
                 sys.stdout.write(f"\r{now}  INFO     [SmartMule.hasher]  [i] Calculando hash ED2K... ({elapsed_str})")
                 sys.stdout.flush()
 
-        # Me reprogramo para el siguiente log en 2 segundos
+        # Crea el siguiente timer (cada 2 segundos)
         t = threading.Timer(2.0, _log_progress)
         t.daemon = True 
-        timer_ref.clear()
         timer_ref.append(t)
         t.start()
 
-    # Inicio el primer timer (se disparará a los 2s si el cálculo no ha terminado)
+    # Iniciamos el sistema de notificaciones de progreso
     first_timer = threading.Timer(2.0, _log_progress)
-
-    first_timer.daemon = True # El timer se detendrá automáticamente cuando el programa principal termine
-
-    timer_ref.append(first_timer) 
-
-    first_timer.start() # Inicio el primer timer
+    first_timer.daemon = True
+    timer_ref.append(first_timer)
+    first_timer.start()
 
     try:
-        chunk_hashes: list[bytes] = []
+
+        # Paso 1: Procesamiento paralelo de bloques
+        chunk_hashes = _process_file_in_parallel(file_to_hash)
         
-        # Usamos la mitad de los núcleos para ser verdaderamente "poco invasivos"
-        cpu_count = os.cpu_count() or 1
-        max_workers = max(1, cpu_count // 2)
-        
-        # Limitamos cuántos bloques de 9.28MB pueden estar en memoria esperando a ser procesados.
-        # Un valor de max_workers * 2 es un buen compromiso entre velocidad y RAM.
-        max_pending = max_workers * 2
-
-        with open(file_to_hash, "rb") as f:
-
-            """
-            Usamos ThreadPoolExecutor. Es mucho más rápido que procesos para bloques grandes
-            porque evita el coste de copiar/serializar datos entre procesos -> IPC (Inter-Process Communication) Overhead.
-            """
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                
-                futures = []
-                
-                while True:
-                    # Si ya tenemos demasiados bloques en memoria esperando, pausamos la lectura
-                    if len(futures) >= max_pending:
-                        # Esperamos a que el primer bloque enviado termine para liberar espacio en el buffer
-                        chunk_hashes.append(futures.pop(0).result())
-                        continue
-
-                    chunk = f.read(ED2K_CHUNK_SIZE)
-                    
-                    if not chunk:
-                        break # Fin del archivo
-                    
-                    # Enviamos el bloque al pool de hilos
-                    futures.append(executor.submit(_calculate_md4_chunk, chunk))
-
-                # Esperamos a que terminen los últimos bloques
-                for fut in futures:
-                    chunk_hashes.append(fut.result())
-
-        # Cálculo final según el estándar ED2K
-        if not chunk_hashes:
-            return MD4.new(b"").hexdigest().upper()
-
-        if len(chunk_hashes) == 1:
-            return chunk_hashes[0].hex().upper()
-
-        # Concatenación y hash final (paso jerárquico)
-        all_hashes_concatenated = b"".join(chunk_hashes)
-        return MD4.new(all_hashes_concatenated).hexdigest().upper()
+        # Paso 2: Cálculo del hash final
+        return _finalize_ed2k_hash(chunk_hashes)
 
     finally:
-        # Me aseguro de cancelar el timer de progreso pase lo que pase (éxito o error).
+
+        # Limpieza de timers y consola
         for t in timer_ref:
-            t.cancel() # Cancelo el timer
-        
-        # Al terminar, imprimo un salto de línea para que el siguiente log no escriba encima (solo si hay consola).
+            t.cancel()
+
+        # Salto de línea para limpiar la consola
         if sys.stdout:
             sys.stdout.write("\n")
             sys.stdout.flush()
+
 
 # Función que formatea el enlace ED2K
 def format_ed2k_link(file_path: Path, file_size: int, hash_hex: str) -> str:
 
     """
     Genero el enlace ED2K estándar de la red eDonkey para un archivo.
-
     El formato estándar es: ed2k://|file|nombre_del_archivo.ext|tamaño_en_bytes|hash_hex|/
-
     Este enlace es compatible con eMule y permite compartir la referencia exacta al archivo en la red P2P.
 
     Args:
@@ -253,7 +262,7 @@ def calculate_fingerprint(path: Path, file_size: int) -> str:
 
         return sha.hexdigest().upper() # Devuelvo el hash en formato hexadecimal y en mayúsculas
 
-    except (OSError, IOError) as e:
+    except OSError as e:
         logger.error(f"[!] Error al calcular fingerprint de {path.name}: {e}")
         return "" 
 

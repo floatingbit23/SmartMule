@@ -80,7 +80,7 @@ def remove_pid():
     if PID_FILE.exists():
         try:
             PID_FILE.unlink()
-        except:
+        except OSError:
             pass
 
 def stop_daemon():
@@ -136,7 +136,173 @@ def setup_io_priority() -> None:
     except Exception as e:
         logger.warning(f"⚠️  No pude establecer la cortesía total de recursos: {e}")
 
+# Función que evalúa los flags --all --no-preserve e interactúa si se pide la "DESTRUCCIÓN TOTAL".
+def _check_destruction_protocol(query: str, select_all: bool, no_preserve: bool) -> tuple[bool, str]:
 
+    # Procesamos el término de búsqueda.
+    search_term = query if query else ""
+
+    # Si no hay query, hay select_all y modo destructivo, entonces avisamos al usuario del modo DESTRUCCIÓN TOTAL.
+    if not search_term and select_all and no_preserve:
+
+        print("\n!!! ATENCION: Has activado el modo 'DESTRUCCIÓN TOTAL' (--all --no-preserve) !!!")
+        print("Ejecutar este comando borrará ABSOLUTAMENTE TODOS los archivos registrados en tu BBDD.")
+
+        # Preguntamos al usuario si está seguro de querer continuar.
+        confirm_total = input("\n¿Estas COMPLETAMENTE SEGURO de querer vaciar tu biblioteca SmartMule y la carpeta Incoming? (ESCRIBE 'BORRAR TODO' para continuar): ")
+        
+        # Si el usuario no confirma, cancelamos la operación.
+        if confirm_total != "BORRAR TODO":
+            print("Operacion cancelada por seguridad.")
+            return False, ""
+    
+        # Si confirma, devolvemos True para que el bucle principal sepa que debe borrar todo.
+        return True, ""
+
+    # Si no hay query y no hay select_all, entonces es una lista normal (sin "purga").
+    elif not search_term and not select_all:
+
+        print("\n[i] No se especificó un término de busqueda. Mostrando lista completa de archivos...")
+        # Devolvemos True para que el bucle principal sepa que debe mostrar todos los archivos.
+        return True, ""
+
+    return True, search_term
+
+# Función que muestra los resultados de la búsqueda.
+def _display_candidates(results: list, no_preserve: bool) -> None:
+
+    # Si no estamos en modo destructivo, mostramos los resultados.
+    if not no_preserve:
+
+        # Recorremos los resultados y los mostramos.
+        for i, res in enumerate(results, 1):
+
+            title = res['official_title'] if res['official_title'] else res['file_name']
+
+            print(f"  [{i}] {title}")
+            print(f"      - Origen:  {res['file_path']}")
+            print(f"      - Destino: {res['final_path'] or 'No organizado'}")
+            print("-" * 40) # Separador de resultados
+
+            """
+            Ejemplo: 
+
+            [1] The Matrix
+            - Origen:  /media/incoming/The.Matrix.1999.1080p.BluRay.x264.YTS.MX/the.matrix.1999.1080p.bluray.x264.yts.mx.mp4
+            - Destino: /media/SmartMule/The Matrix (1999)/The Matrix (1999).mkv
+            ----------------------------------------
+            [2] The Matrix Reloaded
+            - Origen:  /media/incoming/The.Matrix.Reloaded.2003.1080p.BluRay.x264.YTS.MX/the.matrix.reloaded.2003.1080p.bluray.x264.yts.mx.mp4
+            - Destino: /media/SmartMule/The Matrix Reloaded (2003)/The Matrix Reloaded (2003).mkv
+            ----------------------------------------
+            """
+
+
+def _parse_user_selection(choice: str, results_len: int) -> list[int]:
+    choice = choice.strip().lower()
+    if choice == 'all':
+        return list(range(results_len))
+    
+    parts = [p.strip() for p in choice.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("Entrada vacía")
+        
+    indices = []
+    for p in parts:
+        if '-' in p:
+            start, end = p.split('-')
+            start = int(start) - 1
+            end = int(end) - 1
+            if 0 <= start <= end < results_len:
+                indices.extend(range(start, end + 1))
+            else:
+                print(f"\n[!] El rango '{p}' no es válido.")
+                raise ValueError("Rango inválido")
+        else:
+            idx = int(p) - 1
+            if 0 <= idx < results_len:
+                indices.append(idx)
+            else:
+                print(f"\n[!] El número '{p}' no existe en la lista.")
+                raise ValueError("Número inválido")
+                
+    return sorted(set(indices))
+
+# Función auxiliar para borrar archivos físicamente
+def _delete_physical_file(file_path: Path, label: str) -> None:
+
+    # Comprobamos si el archivo existe
+    if file_path.exists():
+
+        try:
+
+            # Si el archivo existe, lo eliminamos
+            if file_path.is_dir():
+                import shutil
+                shutil.rmtree(file_path)
+
+            else:
+                os.remove(file_path)
+
+            print(f"  [-] Eliminado de {label}: {file_path.name}")
+
+        except Exception as e:
+            print(f"  [!] Error borrando origen {file_path.name}: {e}")
+
+    # Si el archivo no existe, saltamos el proceso
+    else:
+        print(f" [i] El archivo ya no existe en {label} (saltando...)")
+
+
+# Función que procesa las eliminaciones de archivos
+def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> None:
+
+    """
+    Elimina físicamente los archivos seleccionados y actualiza la base de datos.
+
+    Args:
+        to_delete: Lista de archivos a eliminar.
+        db: Instancia de la base de datos.
+        no_preserve: Si es True, elimina sin pedir confirmación individual.
+    """
+
+    # Verificacion de seguridad
+    if not no_preserve:
+
+        confirm = input(f"\n!!! ¿Estas SEGURO de que quieres borrar fisicamente estos {len(to_delete)} archivo(s)? (s/n): ").strip().lower()
+       
+        if confirm != 's': # Si el usuario no confirma la eliminacion (no escribe 's')
+            print("Operacion cancelada.")
+            return
+
+    # Si se ejecuta el flag --no-preserve, se salta la verificacion de seguridad
+    else:
+        print(f"[!] Iniciando borrado automatico de {len(to_delete)} archivos...")
+
+
+    # Bucle que procesa cada archivo seleccionado
+    for i, item in enumerate(to_delete, 1):
+
+        # Obtenemos el nombre del archivo
+        file_name = item['file_name']
+
+        print(f"\n[{i}/{len(to_delete)}] Procesando: {file_name}")
+
+        # Eliminamos el archivo de la carpeta de origen (Incoming)
+        _delete_physical_file(Path(item['file_path']), "Incoming")
+        
+        # Si el archivo tiene una ruta final (la ruta de SmartMule), la eliminamos tambien
+        if item['final_path']:
+            _delete_physical_file(Path(item['final_path']), "Library")
+
+        # Finalmente eliminamos el registro de la base de datos
+        db.delete_by_id(item['id'])
+        print(" [OK] Registro eliminado de la base de datos.")
+
+    print("\n [DONE] ¡Purga completada con éxito!\n")
+
+
+# Función principal para purgar archivos
 def purge_files(query: str, select_all: bool = False, no_preserve: bool = False) -> None:
 
     """
@@ -148,211 +314,63 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
         no_preserve: Si es True, borra sin pedir confirmación individual (Modo Destructivo).
     """
 
-    search_term = query if query else "" 
-    
-    # --- PROTOCOLO DE SEGURIDAD (Destrucción Total) ---
+    # Verificacion de seguridad
+    success, search_term = _check_destruction_protocol(query, select_all, no_preserve)
 
-    if not search_term and select_all and no_preserve:
-        print("\n!!! ATENCION: Has activado el modo 'DESTRUCCIÓN TOTAL' (--all --no-preserve) !!!")
-        print("Ejecutar este comando borrará ABSOLUTAMENTE TODOS los archivos registrados en tu BBDD.")
-        confirm_total = input("\n¿Estas COMPLETAMENTE SEGURO de querer vaciar tu biblioteca SmartMule y la carpeta Incoming? (ESCRIBE 'BORRAR TODO' para continuar): ")
-        if confirm_total != "BORRAR TODO":
-            print("Operacion cancelada por seguridad.")
-            return
-        search_term = "" # Busqueda vacía en SQLite (trae todo)
-
-    # Si no hay término de búsqueda (y no estamos en modo destrucción total)
-    elif not search_term and not select_all:
-        # Se permite listar todo para que el usuario elija manualmente.
-        print("\n[i] No se especificó un término de busqueda. Mostrando lista completa de archivos...")
-        search_term = "" # La busqueda vacia en REGEXP trae todo.
-
-    print(f"\n[SEARCH] Buscando archivos para purgar...")
-    
-    db = HashDatabase(DB_PATH)
-    # Nuestra BBDD soporta Regex nativo inyectado desde Python
-    results = db.search_by_name(search_term)
-    
-    if not results:
-        if not search_term:
-            print(f"\n[i] No tienes archivos registrados en la base de datos de SmartMule!\n")
-        else:
-            print(f"\n[-] No se encontraron archivos que coincidan con '{search_term}'.\n")
-        db.close()
+    if not success:
         return
 
-    print(f"\n[OK] Se han encontrado {len(results)} coincidencia(s):\n")
-    
-    # Mostramos la lista de candidatos si no estamos en modo automático
-    if not no_preserve:
-        for i, res in enumerate(results, 1):
-            title = res['official_title'] if res['official_title'] else res['file_name']
-            print(f"  [{i}] {title}")
-            print(f"      - Origen:  {res['file_path']}")
-            print(f"      - Destino: {res['final_path'] or 'No organizado'}")
-            print("-" * 40)
+    print("\n[SEARCH] Buscando archivos para purgar...")
+
+    # Me conecto a la base de datos
+    db = HashDatabase(DB_PATH)
 
     try:
-        to_delete = []
-        # Selección de archivos a eliminar
+
+        # Buscamos archivos usando el término de búsqueda (puede ser vacío para buscar todos).
+        results = db.search_by_name(search_term)
+        
+        # Si la BBDD no devuelve resultados
+        if not results:
+
+            if not search_term:
+                print("\n[i] No tienes archivos registrados en la base de datos de SmartMule!\n")
+            else:
+                print(f"\n[-] No se encontraron archivos que coincidan con '{search_term}'.\n")
+            return
+
+        print(f"\n[OK] Se han encontrado {len(results)} coincidencia(s):\n")
+
+        _display_candidates(results, no_preserve)
+
+        to_delete = [] # Lista para almacenar los archivos seleccionados por el usuario para ser eliminados.
+
+        # Si estamos en modo destructivo, seleccionamos todos los resultados.
         if select_all:
             to_delete = results
+
+        # Si no estamos en modo destructivo, pedimos al usuario que seleccione los archivos a eliminar.
         else:
-            choice = input(f"\nSelección [ej: 1, 3-5] (o 'all'/'quit'): ").strip().lower()
-            
-            # Si presiona salir
+            choice = input("\nSelección [ej: 1, 3-5] (o 'all'/'quit'): ").strip().lower()
             if choice == 'quit':
-                db.close() # Cierra la conexion con la base de datos
                 return
-
-            # Si presiona todos
-            if choice == 'all':
-                to_delete = results # Selecciona todos los resultados para borrarlos
-
-            # Si presiona numeros
-            else:
-                # Intentamos procesar la entrada del usuario (puede fallar si no son números)
-                try:
-                    # Dividimos la entrada por comas, eliminamos espacios y descartamos elementos vacíos
-                    parts = [p.strip() for p in choice.split(",") if p.strip()]
-
-                    # Si no queda nada después del filtrado, lanzamos un error para ir al bloque except
-                    if not parts:
-                        raise ValueError("Entrada vacía")
-                    
-                    # Lista temporal para acumular los índices de los archivos a borrar
-                    indices = []
-
-                    # Iteramos sobre cada fragmento separado por comas
-                    for p in parts:
-
-                        # Si el fragmento detecta un guion, lo tratamos como un rango numérico
-                        if '-' in p:
-                            # Dividimos el rango en valor inicial y valor final
-                            start, end = p.split('-')
-                            # Convertimos a entero y restamos 1 para ajustar al índice 0 de Python
-                            start = int(start) - 1
-                            # Hacemos lo mismo con el valor final del rango
-                            end = int(end) - 1
-
-                            # Validamos que el rango sea lógico, positivo y no se salga de la lista
-                            if 0 <= start <= end < len(results):
-
-                                # Añadimos todos los números del rango a nuestra lista de índices
-                                indices.extend(range(start, end + 1))
-
-                            # Si el rango es incoherente o se sale de los límites...
-                            else:
-                                # Informamos del error específico al usuario
-                                print(f"\n[!] El rango '{p}' no es válido.")
-
-                                # Cerramos la conexión a la BBDD por seguridad antes de salir
-                                db.close()
-
-                                # Abortamos la función de purga
-                                return
-
-                        # Si no hay guion (no es rango), tratamos el fragmento como un número único
-                        else:
-
-                            # Convertimos a entero y restamos 1 para el índice de la lista
-                            idx = int(p) - 1
-
-                            # Verificamos que el número esté dentro del rango de resultados disponibles
-                            if 0 <= idx < len(results):
-
-                                # Añadimos el índice único a nuestra lista
-                                indices.append(idx)
-
-                            # Si el número no corresponde a ningún archivo de la lista...
-
-                            else:
-
-                                # Informamos del error de índice inexistente
-                                print(f"\n[!] El número '{p}' no existe en la lista.")
-
-                                # Cerramos la conexión a la base de datos
-                                db.close()
-
-                                # Salimos de la función
-                                return
-                    
-                    # Convertimos la lista a set (para borrar duplicados), volvemos a lista y ordenamos
-                    indices = sorted(list(set(indices)))
-
-                    # Creamos la lista final de objetos a borrar usando los índices validados
-                    to_delete = [results[i] for i in indices]
-                    
-                # Si en algún punto falla la conversión int() o hay un error de formato...
-                except ValueError:
-
-                    # Informamos al usuario del formato correcto esperado
-                    print("\n[!] Entrada no válida. Usa números separados por comas (ej: 1, 3) o rangos (ej: 1-3).")
-
-                    # Cerramos la base de datos para no dejar conexiones abiertas
-                    db.close()
-
-                    # Terminamos la ejecución
-                    return
-
-        # Confirmación física final
-        if not no_preserve:
-            confirm = input(f"\n!!! ¿Estas SEGURO de que quieres borrar fisicamente estos {len(to_delete)} archivo(s)? (s/n): ").strip().lower()
-            if confirm != 's':
-                print("Operacion cancelada.")
-                db.close()
-                return
-        else:
-            print(f"[!] Iniciando borrado automatico de {len(to_delete)} archivos...")
-
-        # --- CICLO DE ELIMINACIÓN ---
-        for i, item in enumerate(to_delete, 1):
-            file_name = item['file_name']
-            print(f"\n[{i}/{len(to_delete)}] Procesando: {file_name}")
-
-            # 1. Borrar archivo original (Incoming)
-            src = Path(item['file_path'])
-            if src.exists():
-                try:
-                    if src.is_dir():
-                        import shutil
-                        shutil.rmtree(src) # Borrado recursivo de carpetas
-                    else:
-                        os.remove(src) # Borrado de archivo simple
-                    print(f"  [-] Eliminado de Incoming: {src.name}")
-                except Exception as e:
-                    print(f"  [!] Error borrando origen {src.name}: {e}")
-            else:
-                print(f"  [i] El archivo ya no existe en Incoming (saltando).")
             
-            # 2. Borrar archivo organizado (Library)
-            if item['final_path']:
-                dest = Path(item['final_path'])
-                if dest.exists():
-                    try:
-                        if dest.is_dir():
-                            import shutil
-                            shutil.rmtree(dest)
-                        else:
-                            os.remove(dest)
-                        print(f"  [-] Eliminado de Library:  {dest.name}")
-                    except Exception as e:
-                        print(f"  [!] Error borrando destino {dest.name}: {e}")
-                else:
-                    print(f"  [i] El archivo ya no existe en Library (saltando).")
+            try:
+                indices = _parse_user_selection(choice, len(results))
+                to_delete = [results[i] for i in indices]
+            except ValueError:
+                print("\n[!] Entrada no válida. Usa números separados por comas (ej: 1, 3) o rangos (ej: 1-3).")
+                return
 
-            # 3. Borrar de la base de datos (Sincronización total)
-            db.delete_by_id(item['id'])
-            print(f"  [OK] Registro eliminado de la base de datos.")
+        # Procesamos las eliminaciones.
+        _process_deletions(to_delete, db, no_preserve)
 
-        print(f"\n[DONE] ¡Purga completada con éxito!\n")
-
-    except ValueError:
-        print("[!] Entrada no valida.")
     except Exception as e:
         print(f"[ERROR] Error durante la purga: {e}")
+        
     finally:
         db.close() # Siempre cerramos la conexión a la BBDD
+
 
 
 def list_files() -> None:
@@ -411,6 +429,7 @@ def list_files() -> None:
 
 
 def main() -> None:
+
     """Orquestación principal de SmartMule."""
     
     # Forzamos UTF-8 en la consola CMD/PowerShell para evitar errores con Emojis en Windows

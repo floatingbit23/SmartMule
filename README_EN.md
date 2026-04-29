@@ -36,7 +36,7 @@ By default, eMule places all completed downloads into a single `Incoming` folder
     -   **Archive Inspection**: The `ArchiveInspector` analyzes `.zip`, `.rar`, and `.7z` files searching for inconsistencies (e.g., an `.exe` disguised as a movie) and displaying suspicious content in the logs.
     -   **Critical Scores**: If a file has more than 5 detections on VT (prioritizing TOP engines like Microsoft or Kaspersky), it automatically moves it to a **Review** folder.
 
-*   **Intelligent Tie-Breaking**: Uses real video duration to distinguish between movies with the same name (e.g., Solaris 1972 vs. Solaris 2002).
+*   **Intelligent Tie-Breaking**: Uses the release year to distinguish between movies with the same name (e.g., Solaris 1972 vs. Solaris 2002).
 
 *   **Automated Triage**: 
     -   `MALICIOUS`: Automatic destructive deletion.
@@ -79,7 +79,7 @@ pip install -r requirements.txt
 
 For file analysis and movie tie-breaking, SmartMule requires:
 
-*   **FFmpeg (ffprobe)**: Needed to extract video duration and resolution.
+*   **FFmpeg (ffprobe)**: Needed to extract video resolution and technical metadata.
     -   **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html), extract the `.zip`, and add the `bin` folder to your system `PATH`.
     -   **Linux**: `sudo apt install ffmpeg`
 
@@ -99,7 +99,7 @@ For file analysis and movie tie-breaking, SmartMule requires:
 
 4.  **AI Layer (LLM)**: Cleans the "dirty" scene filename and detects the media type (Movies, Music, Books, Software, etc.).
 
-5.  **Enrichment (API)**: Queries **TMDB** or **OpenLibrary** using the year and duration for a perfect match.
+5.  **Enrichment (API)**: Queries **TMDB** or **OpenLibrary** using the year and technical metadata for a precise match.
 
 6.  **Organization**: The `LibraryOrganizer` moves and renames the file to its final destination (e.g., `/Library/Movies_and_Series/The Matrix (1999).mkv`).
 

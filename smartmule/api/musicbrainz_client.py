@@ -30,6 +30,33 @@ class MusicBrainzClient:
             time.sleep(self.min_delay - time_since_last)
         self.last_request_time = time.time()
 
+    def _extract_audio_metadata(self, recording: dict) -> dict:
+        """Extrae y limpia metadatos de un objeto 'recording' de MusicBrainz."""
+        
+        # Inicializamos el diccionario de metadatos con la info básica
+        audio_data = {
+            "title": recording.get("title"),
+            "score": recording.get("score")
+        }
+
+        # Artista: MusicBrainz usa artist-credit. Tomamos el nombre del primer artista acreditado.
+        artist_credit = recording.get("artist-credit", [])
+        audio_data["artist"] = artist_credit[0].get("name") if artist_credit else "Desconocido"
+
+        # Lanzamiento: Buscamos en la lista de releases para obtener el álbum y la fecha de salida.
+        releases = recording.get("releases", [])
+        if releases:
+            first = releases[0]
+            # Si el release no tiene título, marcamos como Sencillo o Desconocido
+            audio_data["album"] = first.get("title", "Sencillo/Desconocido")
+            audio_data["date"] = first.get("date")
+        else:
+            # Si no hay releases asociados, devolvemos valores por defecto
+            audio_data["album"] = "Sencillo/Desconocido"
+            audio_data["date"] = None
+        
+        return audio_data
+
     def search_audio(self, title: str) -> Optional[dict]:
         """
         Busca un track/canción en MusicBrainz usando el título limpio.
@@ -50,51 +77,39 @@ class MusicBrainzClient:
         retry_delays = [2, 5, 10]
 
         for attempt in range(max_retries):
-            self._wait_for_rate_limit() # Siempre respetamos el límite de 1 req/s de MB
+
+            # Respetamos el límite de tasa (rate limit) de 1 req/s exigido por MusicBrainz
+            self._wait_for_rate_limit()
 
             try:
+                # Realizamos la petición GET a la API
                 response = requests.get(
                     url, headers=self.headers, params=params, timeout=API_TIMEOUT
                 )
                 response.raise_for_status()
                 data = response.json()
                 
-                if data and "recordings" in data and len(data["recordings"]) > 0:
-                    recording = data["recordings"][0]
+                # Buscamos si la respuesta contiene grabaciones (recordings)
+                recordings = data.get("recordings", [])
+
+                if recordings:
+
+                    # Si hay resultados, extraemos los metadatos del primer registro
+                    return self._extract_audio_metadata(recordings[0])
                     
-                    audio_data = {
-                        "title": recording.get("title"),
-                        "score": recording.get("score") 
-                    }
-                    
-                    if "artist-credit" in recording and len(recording["artist-credit"]) > 0:
-                        artist = recording["artist-credit"][0].get("name")
-                        audio_data["artist"] = artist
-                    else:
-                        audio_data["artist"] = "Desconocido"
-                    
-                    if "releases" in recording and len(recording["releases"]) > 0:
-                        first_release = recording["releases"][0]
-                        audio_data["album"] = first_release.get("title", "Sencillo/Desconocido")
-                        audio_data["date"] = first_release.get("date")
-                    else:
-                        audio_data["album"] = "Sencillo/Desconocido"
-                        audio_data["date"] = None
-                        
-                    return audio_data
-                    
+                # Si no hay grabaciones, devolvemos None
                 return None
                 
             except requests.exceptions.RequestException as e:
-
-                if attempt < max_retries - 1: # Si no es el último intento
-
-                    wait_time = retry_delays[attempt] # Espera exponencial
-                    logger.warning(f"⚠️ Error conectando a MusicBrainz ({e}). Reintentando en {wait_time}s... ({attempt + 1}/{max_retries})")
-                    time.sleep(wait_time) # Espera antes de reintentar
-
-                else:
+                
+                # Si hemos agotado los reintentos, registramos el error y salimos
+                if attempt >= max_retries - 1:
                     logger.error(f"❌ Error definitivo conectando a MusicBrainz tras {max_retries} intentos: {e}")
                     return None
+
+                # Si quedan intentos, esperamos el tiempo definido antes de volver a probar
+                wait_time = retry_delays[attempt]
+                logger.warning(f"⚠️ Error conectando a MusicBrainz ({e}). Reintentando en {wait_time}s... ({attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
         
         return None

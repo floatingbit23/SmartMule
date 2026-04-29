@@ -36,7 +36,7 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
     -   **Inspección de Contenedores**: El `ArchiveInspector` analiza archivos `.zip`, `.rar` y `.7z` buscando inconsistencias (ej: un `.exe` disfrazado de película) y mostrando el contenido sospechoso en los logs.
     -   **Puntuaciones Críticas**: Si un archivo tiene más de 5 detecciones en VT (priorizando motores TOP como Microsoft o Kaspersky), lo mueve a **Review** para evitar riesgos.
 
-*   **Desempate Inteligente (Tie-Breaking)**: Usa la duración real de los videos para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
+*   **Desempate Inteligente (Tie-Breaking)**: Usa el año de estreno para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 
 *   **Triaje Automático**: 
     -   `MALICIOUS`: Borrado automático destructivo.
@@ -80,7 +80,7 @@ pip install -r requirements.txt
 
 Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
-*   **FFmpeg (ffprobe)**: Necesario para extraer la duración y resolución de los videos.
+*   **FFmpeg (ffprobe)**: Necesario para extraer la resolución y metadatos técnicos de los videos.
     -   **Windows**: Descarga de [ffmpeg.org](https://ffmpeg.org/download.html), extrae el `.zip` y añade la carpeta `bin` al `PATH` de tu sistema.
     -   **Linux**: `sudo apt install ffmpeg`
 
@@ -100,7 +100,7 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 4.  **Capa IA (LLM)**: Limpia el nombre "sucio" de la _Scene_ y detecta el tipo de medio (Cine, Música, Libros, Software, etc.).
 
-5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary** usando el año y la duración para un emparejamiento perfecto.
+5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary** usando el año y metadatos técnicos para un emparejamiento preciso.
 
 6.  **Organización**: El `LibraryOrganizer` mueve el archivo a su destino final (ej: `/Library/Movies_and_Series/Matrix (1999).mkv`).
 

@@ -256,7 +256,7 @@ class QueueManager:
         Nunca hay dos archivos procesándose en paralelo, lo cual es más respetuoso con el HDD/SSD.
         """
 
-        logger.debug("ℹ️  Worker loop arrancado")
+        logger.debug("[i]  Worker loop arrancado")
 
         # Mientras no se reciba la señal de parada, el Worker intentará sacar tareas de la cola.
         while not self._stop_event.is_set():
@@ -275,7 +275,7 @@ class QueueManager:
             # Esto me permite hacer un shutdown limpio.
 
             if task is None or getattr(task, 'is_sentinel', False):
-                logger.debug("ℹ️  Worker recibió señal de parada (centinela)")
+                logger.debug("[i]  Worker recibió señal de parada (centinela)")
                 self._queue.task_done() # Marco la tarea como completada
                 break # Salgo del bucle
 
@@ -313,19 +313,84 @@ class QueueManager:
                 self._queue.task_done() # Marco la tarea como completada
 
         # Cuando el bucle termina (porque stop_event está activo), salgo del método.
-        logger.info("ℹ️  Worker detenido limpiamente")
+        logger.info("[i]  Worker detenido limpiamente")
+
+
+    def _evaluate_cache_state(self, file_path: Path, fingerprint: str, file_size: int) -> tuple[bool, bool, dict]:
+
+        """
+        Comprueba la caché por Huella Digital (Fingerprint).
+        Devuelve: (should_skip, force_rehash, existing_record)
+        """
+
+        # Busco en la caché por huella
+        existing = self._db.get_by_fingerprint(fingerprint, file_size)
+
+        # Si no existe, salgo de la comprobación
+        if not existing:
+            return False, False, None
+
+        # Si existe, compruebo que el archivo no haya cambiado (comparando la fecha de modificación del archivo con la que está guardada en la caché)
+        # Si la fecha ha cambiado, necesito recalcular el hash.
+        # Si la fecha no ha cambiado, el archivo está en su sitio original y no necesito hacer nada.
+        
+        file_name = file_path.name
+        actual_mtime = int(file_path.stat().st_mtime)
+        cached_mtime = existing.get('file_mtime', 0)
+
+        # Si el registro indica que el archivo está organizado (is_organized == 1)
+        if existing.get('is_organized', 0) == 1:
+            
+            # Obtengo la ruta final del archivo
+            final_path_str = existing.get('final_path', '')
+
+            # Convierto la ruta a Path
+            final_path = Path(final_path_str) if final_path_str else None
+
+            # Si la fecha de modificación no ha cambiado, el archivo está en su sitio original y no necesito hacer nada.
+            if actual_mtime != cached_mtime:
+
+                logger.info(f"⚠️  Detectado cambio en la fecha de modificación de {file_name}. Verificando integridad del hash...")
+                return False, True, existing
+            
+            # Si la fecha de modificación no ha cambiado, pero no tengo la ruta final...
+            elif final_path and not final_path.exists():
+
+                logger.warning(f"⚠️  El registro indica que ya estaba organizado, pero NO ha sido encontrado en: {final_path_str}")
+                logger.info(f"ℹ️  Forzando re-organización de {file_name}...")
+                return False, False, existing
+            
+            # Si el archivo está en su sitio original y no ha cambiado...
+            else:
+
+                # Obtengo el hash y el link de eD2K desde la BBDD
+                ed2k_hash = existing['ed2k_hash'] 
+                ed2k_link = existing['ed2k_link']
+
+                # Muestro la información del archivo
+                logger.info("✅  Contenido reconocido (Fingerprint + MTime) y completamente organizado.")
+                logger.info(f"🔹  Hash ED2K: {ed2k_hash}")
+                logger.info(f"🔹  Link: {ed2k_link}")
+                logger.info(f"[i]  Archivo en su ruta final: {existing.get('final_path')}")
+                
+                # Salgo de la comprobación
+                return True, False, existing
+        
+        # Si no está organizado (is_organized == 0) o faltan metadatos
+        else:
+            logger.info(f"[i]  El archivo con fingerprint [{fingerprint[:8]}] ya existe, pero faltan metadatos o no fue organizado. Forzando re-análisis completo...")
+            return False, False, existing
 
 
     # Método que procesa el archivo
     def _process_file(self, task: FileTask) -> None:
 
         """
-        Pipeline de procesamiento del archivo. De momento lo que hace es:
+        Pipeline de procesamiento del archivo:
         1. Comprueba la caché por Huella Digital (Fingerprint) para evitar hashing completo.
         2. Si no está en caché, calcula el hash ED2K completo.
         3. Guarda el hash en la BBDD y la huella en la caché (entrada de SQLite).
 
-        En implementaciones posteriores se añadirán aquí las fases de IA y APIs de metadatos.
 
         Args:
             task: La tarea (FileTask) de archivo a procesar.
@@ -340,7 +405,7 @@ class QueueManager:
         wait_time = time.time() - task.enqueued_at 
 
         logger.info(
-            f"ℹ️  Procesando [P{task.priority}]: {file_name} ({size_str}) "
+            f"[i]  Procesando [P{task.priority}]: {file_name} ({size_str}) "
             f"— esperó {wait_time:.2f}s en cola"
         )
 
@@ -350,62 +415,17 @@ class QueueManager:
         # Calculo la Fast-Fingerprint (primeros 256KB y últimos 256KB).
         fingerprint = calculate_fingerprint(file_path, task.file_size)
 
+        # Si no se pudo calcular la huella, registramos el error y saltamos la tarea.
         if not fingerprint:
             logger.error(f"❌ No se pudo generar la huella digital de {file_name}. Abortando...")
             return
 
-        # Consulto a la BBDD si ya conocemos este contenido exactamente (por su huella).
-        existing = self._db.get_by_fingerprint(fingerprint, task.file_size)
+        # Evalúo si la huella ya se ha calculado antes y si el archivo ha cambiado.
+        should_skip, force_rehash, existing = self._evaluate_cache_state(file_path, fingerprint, task.file_size)
 
-        # Guardamos si estamos forzando el re-análisis por mtime
-        force_rehash = False
-
-        if existing: # Si existe contenido conocido por Fingerprint
-            
-            # Verificamos si realmente se completó el enriquecimiento y la organización
-            actual_mtime = int(file_path.stat().st_mtime)
-            cached_mtime = existing.get('file_mtime', 0)
-
-            # Si el archivo ya está organizado, verificamos si el mtime coincide y si el archivo sigue existiendo en destino.
-            if existing.get('is_organized', 0) == 1:
-                
-                final_path_str = existing.get('final_path', '')
-                final_path = Path(final_path_str) if final_path_str else None
-
-                # Si el mtime NO coincide, el archivo fue manipulado desde la última vez.
-                # Lo marcamos para recalcular el hash pero intentando ahorrar APIs si el hash es el mismo.
-                if actual_mtime != cached_mtime:
-                    logger.info(f"⚠️  Detectado cambio en la fecha de modificación de {file_name}. Verificando integridad del hash...")
-                    force_rehash = True # Vamos a la Fase 2, pero con cautela.
-                
-                # Si el archivo fue borrado de la biblioteca, forzamos re-organización
-                elif final_path and not final_path.exists():
-                    logger.warning(f"⚠️  El registro indica que ya estaba organizado, pero NO ha sido encontrado en: {final_path_str}")
-                    logger.info(f"ℹ️  Forzando re-organización de {file_name}...")
-                    # No activamos force_rehash porque el contenido es el mismo! (mtime coincide), solo queremos que pase por el Organizer de nuevo.
-                
-                # Si el mtime coincide y el archivo existe, el archivo NO ha sido manipulado, entonces lo saltamos.
-                else:
-                    ed2k_hash = existing['ed2k_hash'] 
-                    ed2k_link = existing['ed2k_link']
-                    processed_at_raw = existing['processed_at']
-
-                    # Formateo la fecha
-                    try:
-                        dt = datetime.fromisoformat(processed_at_raw)
-                        processed_at = dt.strftime("%d/%m/%Y %H:%M:%S")
-                    except Exception:
-                        processed_at = processed_at_raw 
-
-                    logger.info(f"✅  Contenido reconocido (Fingerprint + MTime) y completamente organizado.")
-                    logger.info(f"🔹  Hash ED2K: {ed2k_hash}")
-                    logger.info(f"🔹  Link: {ed2k_link}")
-                    logger.info(f"ℹ️  Archivo en su ruta final: {existing.get('final_path')}")
-                    return 
-
-            else:
-                logger.info(f"ℹ️  El archivo con fingerprint [{fingerprint[:8]}] ya existe, pero faltan metadatos o no fue organizado. Forzando re-análisis completo...")
-                # Continuamos a la Fase 2 sin optimización (re-proceso total).
+        # Si se debe saltar (porque la huella coincide con un archivo ya organizado y está en su sitio), registramos el log y salimos.
+        if should_skip:
+            return
 
 
         # === FASE 2: Hashing ED2K ===
@@ -447,11 +467,11 @@ class QueueManager:
         # === FASE 3: Persistencia Inicial en Caché ===
 
         self._db.save(file_path, task.file_size, fingerprint, ed2k_hash, ed2k_link)
-        logger.info(f"✅  Hash guardado inicialmente en BBDD.")
+        logger.info("✅  Hash guardado inicialmente en BBDD.")
 
         # === FASE 4: IA + APIs ===
 
-        logger.info(f"🔹  Iniciando orquestación de metadatos (Regex -> IA -> API -> Antimalware)...")
+        logger.info("🔹  Iniciando orquestación de metadatos (Regex -> IA -> API -> Antimalware)...")
 
         engine = MetadataEngine(db=self._db) # Instancio el motor de metadatos con la BBDD
         metadata_dict = engine.identify_file(file_name, str(file_path), ed2k_hash=ed2k_hash)  # Pipeline completo de metadatos
@@ -466,10 +486,9 @@ class QueueManager:
         self._db.update_metadata(fingerprint, task.file_size, metadata_dict, final_path)
         
         if final_path == "<DELETED_MALICIOUS>":
-            logger.info(f"✅  Archivo purgado de la cola y del sistema.")
+            logger.info("✅  Archivo purgado de la cola y del sistema.")
         else:
             logger.info(f"✅  Procesamiento y organización superados para: {file_name}")
-
 
     # Método para detener el Worker Thread
     def stop(self) -> None:

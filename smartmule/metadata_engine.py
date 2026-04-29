@@ -41,401 +41,306 @@ class MetadataEngine:
         Ahora soporta carpetas buscando un archivo representante.
         Si se proporciona ed2k_hash y BBDD, verifica la caché antes de gastar recursos de API.
         """
+        filename, display_name, technical_target = self._resolve_target(filename, filepath)
+        logger.info(f"🔍  Identificando archivo [{filename}]...")
 
+        # --- CACHÉ DE BÚSQUEDAS (API Optimization) ---
+        if self.db and ed2k_hash:
+            cached_data = self.db.get_metadata_cache(ed2k_hash)
+            if cached_data:
+                logger.info(f"⚡ ¡Caché Hit! Metadatos recuperados instantáneamente para {ed2k_hash[:8]}...")
+                return cached_data
+
+        # ================= CAPA 1 y 2: Regex Simple y Análisis IA =================
+        data = self._apply_regex_and_ai(filename)
+
+        titulo_limpio = data.get("title", "")
+        media_type = data.get("media_type", "unknown")
+        logger.info(f"✨  Nombre limpio: '{titulo_limpio}' ({media_type})")
+
+        # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
+        if self._inspect_compressed(data, filename, technical_target):
+            return data
+
+        # ================= CAPA 3: APIs Oficiales y Triaje VT =================
+        self._enrich_with_apis(data, filename, technical_target)
+        self._log_metadata_card(data)
+
+        # Guardamos en caché
+        if self.db and ed2k_hash:
+            self.db.set_metadata_cache(ed2k_hash, data)
+
+        return data
+
+    def _resolve_target(self, filename: str, filepath: str) -> tuple[str, str, str]:
         item_path = Path(filepath) if filepath else Path(filename)
-        is_directory = item_path.is_dir()
-        
-        # Guardamos el nombre original para logs
         display_name = filename
+        technical_target = filepath or filename
 
-        # Si es un directorio, buscamos el archivo "base" (el más grande que sea video/audio)
-        if is_directory:
-            
+        if item_path.is_dir():
             logger.info(f"📂  Procesando directorio: {display_name}")
             representative = self._find_representative_file(item_path)
             
-            # Definimos el objetivo para escaneos técnicos (VT, MediaInspector, etc.)
             if representative:
                 technical_target = str(representative)
                 logger.info(f"🔍  Archivo representante encontrado: {representative.name}")
-
-                # Si el nombre del archivo representante es muy genérico, preferimos usar el nombre de la carpeta
                 if len(representative.stem) < 5 or representative.stem.lower() in ["movie", "video", "cd1", "cd2"]:
-                    logger.info(f"ℹ️  Usando nombre de carpeta para identificar (nombre de archivo genérico)")
+                    logger.info("ℹ️  Usando nombre de carpeta para identificar (nombre de archivo genérico)")
                 else:
                     filename = representative.name
             else:
                 technical_target = filepath
                 logger.warning(f"⚠️  No se encontró un archivo multimedia claro en la carpeta {display_name}")
-        else:
-            technical_target = filepath or filename
 
-        logger.info(f"🔍  Identificando archivo [{filename}]...")
-        
-        # --- CACHÉ DE BÚSQUEDAS (API Optimization) ---
-        if self.db and ed2k_hash:
-            cached_data = self.db.get_metadata_cache(ed2k_hash)
-            if cached_data:
-                # Si se encuentra en la caché, se devuelve directamente sin ejecutar Capa 1 (Regex) ni Capa 2 (IA)
-                logger.info(f"⚡ ¡Caché Hit! Metadatos recuperados instantáneamente para {ed2k_hash[:8]}...")
-                return cached_data
-        
-        # ================= CAPA 1: Regex Simple =================
-        
+        return filename, display_name, technical_target
+
+    def _apply_regex_and_ai(self, filename: str) -> dict:
         data = parse_filename(filename)
         
-
-        # ================= CAPA 2: IA =================
-
-
-        if data.get("confidence") == "low": # Si la confianza en el resultado de Regex es baja, escalamos a IA
-
-            # Pasamos los datos que ya sabemos (idiomas, subs) como pistas a la IA
+        if data.get("confidence") == "low":
             context_data = {
                 "languages": data.get("languages"),
                 "subtitles": data.get("subtitles")
             }
-            ai_data = parse_with_llm(filename, context=context_data) # Llamamos a la IA con pistas
+            ai_data = parse_with_llm(filename, context=context_data)
             
-            # Si la IA tuvo éxito, combinamos
             if ai_data.get("confidence") != "failed":
-
-                # Respetamos la extensión original que sacó la Capa 1
                 ai_data["extension"] = data.get("extension")
-                
-                # Respetamos resolución, idiomas y subtítulos detectados por Regex (más fiable para etiquetas técnicas)
                 ai_data["resolution"] = data.get("resolution", "")
                 ai_data["languages"] = data.get("languages", "")
                 ai_data["subtitles"] = data.get("subtitles", "")
                 
-                # Respetamos el media_type original (obtenido por Regex) si la IA lo borró o no sabía ("unknown")
                 if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
                     ai_data["media_type"] = data.get("media_type")
                     
-                data = ai_data # Combinamos los datos de la IA con los de Regex
-
+                data = ai_data
             else:
                 logger.warning("❌  Análisis por IA falló. Volviendo al resultado regular de Capa 1.")
-                
-        # Extracción de datos clave para la siguiente fase
-        titulo_limpio = data.get("title", "")
-        media_type = data.get("media_type", "unknown")
-        year = data.get("year")
-        
-        logger.info(f"✨  Nombre limpio: '{titulo_limpio}' ({media_type})")
+        return data
 
-
-        # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
-        
-
-        if media_type == "compressed" and technical_target: # Si el archivo es un comprimido y tenemos la ruta
-
+    def _inspect_compressed(self, data: dict, filename: str, technical_target: str) -> bool:
+        media_type = data.get("media_type")
+        if media_type == "compressed" and technical_target:
             from smartmule.parsers.archive_inspector import inspect_archive
                 
-            logger.info(f"🗜️  Archivo comprimido detectado. Iniciando análisis...")
+            logger.info("🗜️  Archivo comprimido detectado. Iniciando análisis...")
             inspection = inspect_archive(technical_target, expected_type=media_type)
             
-            # Si el interior revela un FAKE/MALICIOUS o está encriptado (protegido con contraseña), anulamos todo el proceso.
             if inspection["status"] in ["MALICIOUS", "SUSPICIOUS"]:
-                logger.warning(f"🛑  Triaje de seguridad abortado por Inconsistencia Semántica o Cifrado.")
-                
-                # Simulamos la respuesta final para que conste en BBDD y en el Organizer
-                veredicto = "\033[91mMALICIOUS !!!\033[0m" if inspection["status"] == "MALICIOUS" else "\033[93mSUSPICIOUS !\033[0m"
-                
+                logger.warning("🛑  Triaje de seguridad abortado por Inconsistencia Semántica o Cifrado.")
+                veredicto = "[91mMALICIOUS !!![0m" if inspection["status"] == "MALICIOUS" else "[93mSUSPICIOUS ![0m"
                 data["api_data"] = {
                     "source": "Semantic Inspector",
                     "official_title": filename,
                     "veredicto": veredicto,
                     "malicious_count": 99 if inspection["status"] == "MALICIOUS" else 1, 
                     "suspicious_count": 0,
-                    "url": "N/A (Semantic Malware)" # No hay URL porque se trata de un archivo comprimido
+                    "url": "N/A (Semantic Malware)"
                 }
-
-                # Mantenemos status sin procesar APIs oficiales
-                return data
+                return True
                 
-            # Si el archivo comprimido es SAFE, y contiene un archivo multimedia claro, reclasificamos para que TMDB/OpenLibrary hagan su trabajo
-            # Por ejemplo, si el archivo es "Mi_Pelicula.rar" y dentro tiene "Mi_Pelicula.mp4", lo reclasificamos como "video"
-
             if inspection["status"] == "SAFE" and inspection.get("detected_media"):
-
                 logger.info(f"🔄 Reclasificando media_type por contenido interno: 'compressed' -> '{inspection['detected_media']}'")
-                
-                media_type = inspection["detected_media"] # Obtenemos el Media Type
-                data["media_type"] = media_type # Actualizamos el Media Type
-                
-                # Guardamos el archivo representante interno si existe
+                data["media_type"] = inspection["detected_media"]
                 if inspection.get("representative"):
                     data["internal_representative"] = Path(inspection["representative"]).name
- 
+        return False
 
-        # ================= CAPA 3: APIs Oficiales =================
-
-        api_result = None
-        data["api_data"] = None
+    def _enrich_with_apis(self, data: dict, filename: str, technical_target: str):
+        titulo_limpio = data.get("title", "")
+        media_type = data.get("media_type", "unknown")
+        year = data.get("year")
 
         if media_type in ["video", "tv series", "movie"]: 
-            
-            # --- DESEMPATE TÉCNICO (En caso de homónimos) ---
-
-            # Obtenemos duración real del archivo para desempate si hay homónimos
-            from smartmule.parsers.media_inspector import inspect_media_file
-
-            tech_info = inspect_media_file(technical_target) # Información técnica del archivo
-            actual_duration_min = tech_info.get("duration_sec", 0) // 60 # Duración en minutos
-
-            # TMDB diferencia Películas de Series
-            if data.get("season"):
-                logger.info("📺 Buscando en TMDB como Serie...")
-                results = self.tmdb.search_tv(titulo_limpio, year) 
-            else:
-                logger.info("🎬 Buscando en TMDB como Película...")
-                results = self.tmdb.search_movie(titulo_limpio, year)
-
-            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
-
-            if not results:
-
-                # Obtenemos el título alternativo
-                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
-
-                if titulo_alternativo:
-                    logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
-                    
-                    if data.get("season"): # Si es una serie
-                        results = self.tmdb.search_tv(titulo_alternativo, year)
-                    else: # Si es una película
-                        results = self.tmdb.search_movie(titulo_alternativo, year)
-
-
-            if results: # Si se encontraron resultados
-                
-                # Algoritmo de Scoring (Criterio de desempate)
-                best_match = results[0] # Fallback al primero
-                best_score = -1 
-
-                for res in results: # Para cada resultado
-
-                    # Inicializamos la puntuación (Score)
-                    score = 0
-
-                    # Obtenemos el título y la fecha de la API
-                    res_title = res.get("title") or res.get("name")
-                    res_date = res.get("release_date") or res.get("first_air_date") or ""
-                    
-                    # Criterio 1: PUNTUACIÓN POR TÍTULO (Exacto = 50 pts)
-                    if res_title.lower() == titulo_limpio.lower():
-                        score += 50
-                    
-                    # Criterio 2: PUNTUACIÓN POR AÑO (Si coincide año de estreno = 30 pts)
-                    if year and str(year) in res_date:
-                        score += 30
-
-                    # Criterio 3: PUNTUACIÓN POR DURACIÓN
-
-                    # TMDB no da el runtime en el /search directamente, pero si estuviera, sumaríamos 20 pts.
-                    # Por ahora, si solo hay un resultado, es ese. Si hay varios, el año suele ser decisivo.
-                    
-                    # Actualizamos el mejor resultado si este tiene mayor puntuación
-                    if score > best_score:
-                        best_score = score
-                        best_match = res 
-
-                api_result = best_match # Asignamos el mejor resultado
-
-                # Construimos la URL del póster
-                poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
-                
-                # Guardamos los datos en el diccionario
-                data["api_data"] = {
-                    "source": "TMDB",
-                    "official_title": api_result.get("name") or api_result.get("title"),
-                    "date": api_result.get("first_air_date") or api_result.get("release_date"),
-                    "score": api_result.get("vote_average"), # Puntuación en TMDB
-                    "poster_url": poster,
-                    "overview": api_result.get("overview")
-                }
-                
+            self._query_tmdb(data, titulo_limpio, year)
         elif media_type == "book":
-
-            logger.info("📚 Buscando en OpenLibrary como Libro...")
-            api_result = self.openlibrary.search_book(titulo_limpio)
-
-            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
-            if not api_result:
-                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
-                if titulo_alternativo:
-                    logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
-                    api_result = self.openlibrary.search_book(titulo_alternativo)
-
-            # Si se encontró resultado
-            if api_result:
-                similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
-                
-                if similitud < 0.7:
-                    logger.warning(f"⚠️  Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
-                    api_result = None
-                else:
-                    data["api_data"] = {
-                        "source": "OpenLibrary",
-                        "official_title": api_result.get("title"),
-                        "author": api_result.get("author_name_str"),
-                        "date": api_result.get("first_publish_year"),
-                        "cover_id": api_result.get("cover_i"), # ID de la portada
-                        "score": api_result.get("ratings_average") # Puntuación media sobre 5
-                    }
-                
+            self._query_openlibrary(data, titulo_limpio)
         elif media_type == "audio":
-
-            logger.info("🎵  Buscando en MusicBrainz como Audio...")
-            api_result = self.musicbrainz.search_audio(titulo_limpio)
-
-            # === PLAN B: Reintento por duplicidad de títulos (AKA) ===
-            if not api_result:
-                titulo_alternativo = self._get_plan_b_title(titulo_limpio)
-                if titulo_alternativo:
-                    logger.info(f"🔄  Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
-                    api_result = self.musicbrainz.search_audio(titulo_alternativo)
-            
-            if api_result:
-                # --- VALIDACIÓN DE CONFIANZA (Filtro de Falsos Positivos Avanzado) ---
-                
-                def normalizar_comparacion(s):
-                    # 1. Normalizamos (NFD) para tildes
-                    # 2. Pasamos a minusculas
-                    # 3. Quitamos todo lo que no sea una letra o un numero
-                    sn = "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).lower()
-                    return re.sub(r'[^a-z0-9]', '', sn)
-
-                api_title = api_result.get("title", "")
-                api_artist = api_result.get("artist", "")
-                full_api_name = f"{api_artist} {api_title}"
-                
-                # Nombres normalizados al MAXIMO (sin simbolos ni espacios)
-                search_name_clean = normalizar_comparacion(titulo_limpio)
-                full_api_clean = normalizar_comparacion(full_api_name)
-                api_title_clean = normalizar_comparacion(api_title)
-
-                # 1. Similitud con el nombre completo (Sin basura estetica)
-                # Si una vez quitado todo los caracteres son casi los mismos, es un acierto
-                similitud_completa = SequenceMatcher(None, search_name_clean, full_api_clean).ratio()
-                
-                # 2. ¿El título limpio aparece dentro del nombre del archivo limpio?
-                contiene_titulo = api_title_clean in search_name_clean and len(api_title_clean) > 2
-
-                if similitud_completa < 0.65 and not contiene_titulo:
-                    logger.warning(f"⚠️  Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
-                    api_result = None 
-                else:
-                    # ¡Aceptado!
-                    data["api_data"] = {
-                        "source": "MusicBrainz",
-                        "official_title": api_result.get("title"),
-                        "author": api_result.get("artist"),
-                        "date": api_result.get("date"),
-                        "score": api_result.get("score") 
-                    }
-
+            self._query_musicbrainz(data, titulo_limpio)
         elif media_type == "subtitles":
             logger.info("📝  Subtítulos detectados.")
-
-        # Triaje de seguridad para software y archivos comprimidos
-        elif media_type == "software" or media_type == "compressed":
-
-            internal_name = data.get("internal_representative") # Nombre del archivo interno, si existe
-            target_info = f"-> [{internal_name}]" if internal_name else "" # Si hay un archivo interno, lo mostramos
-
-            # Disclaimer para archivos de la suite Office con macros o potencial ejecución (incluído el formato PDF)
-            office_macros = {
-                ".xlsm", ".xlsb", ".docm", ".pptm", ".dotm", ".ppsm", ".potm", ".xltm", ".xlam",
-                ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk", ".pdf"
-            }
-
-            extension = data.get("extension", "").lower()
-            
-            # Si la extensión está en el diccionario de macros, mostramos un warning y se analiza como software por VT
-            if extension in office_macros:
-                 logger.warning(f"🛡️  [Seguridad] {filename} contiene Macros de Office!! Lo trataré como ejecutable para triaje preventivo...")
-
-            # Ejemplo: "Software/Archivo comprimido detectado -> [archivo.exe]"
-            logger.info(f"💾  Software/Archivo comprimido detectado {target_info}. Iniciando triaje de seguridad con VirusTotal...")
-
-            if technical_target:
-
-                # Hacemos el triaje SHA-256 del software
-                vt_result = self.virustotal.scan_software(technical_target)
-
-                # Si se encontró resultado...
-                if vt_result:
-                    stats = vt_result["stats"]
-                    results = vt_result["results"]
-                    file_hash = vt_result["hash"]
-                    
-                    malicious = stats.get("malicious", 0)
-                    suspicious = stats.get("suspicious", 0)
-
-                    # --- Validación de Motores (Antivirus) TOP (Elite Triage) ---
-                    TOP_ANTIVIRUS = [
-                        "Microsoft", "Kaspersky", "ESET-NOD32", "BitDefender", 
-                        "Symantec", "Sophos", "TrendMicro", "FireEye", "CrowdStrike"
-                    ]
-                    
-                    top_threats = []
-
-                    # Recorremos los motores TOP
-                    for engine in TOP_ANTIVIRUS:
-                        res = results.get(engine)
-                        
-                        # Si un solo motor TOP lo marca, es categorizado como MALICIOUS directamente
-                        if res and res.get("category") == "malicious":
-                            top_threats.append(engine)
-
-                    # Si ningún motor TOP lo marca, determinamos el veredicto aplicando un umbral de malicious/suspicious
-                    if top_threats:
-                        veredicto = f"\033[91mMALICIOUS !!! (Detected by: {', '.join(top_threats)})\033[0m"
-                    elif malicious == 0 and suspicious == 0:
-                        veredicto = "\033[92mSAFE\033[0m" # Verde (seguro)
-                    elif 1 <= malicious <= 5:
-                        veredicto = "\033[93mSUSPICIOUS\033[0m" # Amarillo (sospechoso)
-                    elif malicious > 5:
-                        veredicto = "\033[91mMALICIOUS\033[0m" # Rojo (malicioso)
-                    else:
-                        veredicto = "\033[93mSUSPICIOUS\033[0m"
-                    
-                    # Generamos la URL del informe solo si el archivo existe (no es UNKNOWN)
-                    vt_url = f"https://www.virustotal.com/gui/file/{file_hash}" if stats.get("suspicious") != -1 else None
-
-                    data["api_data"] = {
-                        "source": "VirusTotal",
-                        "official_title": filename,
-                        "veredicto": veredicto,
-                        "malicious_count": malicious,
-                        "suspicious_count": suspicious,
-                        "top_hits": top_threats,
-                        "url": vt_url
-                    }
-                    
-                    if stats.get("suspicious") == -1: # Si el archivo no se encontró en VirusTotal
-                        data["api_data"]["veredicto"] = "\033[93mUNKNOWN (Not found in VT)\033[0m"
-           
-            else:
-                logger.warning("⚠️  No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
-
-        # Si el tipo de medio es desconocido, omitimos la búsqueda en APIs
+        elif media_type in ["software", "compressed"]:
+            self._scan_software(data, filename, technical_target)
         else:
             logger.info("❓  Tipo de medio desconocido, omitiendo búsqueda en APIs.")
 
+    def _query_tmdb(self, data: dict, titulo_limpio: str, year: str):
+        if data.get("season"):
+            logger.info("📺 Buscando en TMDB como Serie...")
+            results = self.tmdb.search_tv(titulo_limpio, year) 
+        else:
+            logger.info("🎬 Buscando en TMDB como Película...")
+            results = self.tmdb.search_movie(titulo_limpio, year)
 
-        # Imprimir "Tarjeta de Metadatos" resumen en el log
+        if not results:
+            titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+            if titulo_alternativo:
+                logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                if data.get("season"):
+                    results = self.tmdb.search_tv(titulo_alternativo, year)
+                else:
+                    results = self.tmdb.search_movie(titulo_alternativo, year)
+
+        if results:
+            best_match = results[0]
+            best_score = -1 
+            for res in results:
+                score = 0
+                res_title = res.get("title") or res.get("name")
+                res_date = res.get("release_date") or res.get("first_air_date") or ""
+                
+                if res_title.lower() == titulo_limpio.lower():
+                    score += 50
+                if year and str(year) in res_date:
+                    score += 30
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = res 
+
+            api_result = best_match
+            poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
+            
+            data["api_data"] = {
+                "source": "TMDB",
+                "official_title": api_result.get("name") or api_result.get("title"),
+                "date": api_result.get("first_air_date") or api_result.get("release_date"),
+                "score": api_result.get("vote_average"),
+                "poster_url": poster,
+                "overview": api_result.get("overview")
+            }
+
+    def _query_openlibrary(self, data: dict, titulo_limpio: str):
+        logger.info("📚 Buscando en OpenLibrary como Libro...")
+        api_result = self.openlibrary.search_book(titulo_limpio)
+
+        if not api_result:
+            titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+            if titulo_alternativo:
+                logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                api_result = self.openlibrary.search_book(titulo_alternativo)
+
+        if api_result:
+            similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
+            if similitud < 0.7:
+                logger.warning(f"⚠️  Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
+            else:
+                data["api_data"] = {
+                    "source": "OpenLibrary",
+                    "official_title": api_result.get("title"),
+                    "author": api_result.get("author_name_str"),
+                    "date": api_result.get("first_publish_year"),
+                    "cover_id": api_result.get("cover_i"),
+                    "score": api_result.get("ratings_average")
+                }
+
+    def _query_musicbrainz(self, data: dict, titulo_limpio: str):
+        logger.info("🎵  Buscando en MusicBrainz como Audio...")
+        api_result = self.musicbrainz.search_audio(titulo_limpio)
+
+        if not api_result:
+            titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+            if titulo_alternativo:
+                logger.info(f"🔄  Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                api_result = self.musicbrainz.search_audio(titulo_alternativo)
+        
+        if api_result:
+            def normalizar_comparacion(s):
+                sn = "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).lower()
+                return re.sub(r'[^a-z0-9]', '', sn)
+
+            api_title = api_result.get("title", "")
+            api_artist = api_result.get("artist", "")
+            full_api_name = f"{api_artist} {api_title}"
+            
+            search_name_clean = normalizar_comparacion(titulo_limpio)
+            full_api_clean = normalizar_comparacion(full_api_name)
+            api_title_clean = normalizar_comparacion(api_title)
+
+            similitud_completa = SequenceMatcher(None, search_name_clean, full_api_clean).ratio()
+            contiene_titulo = api_title_clean in search_name_clean and len(api_title_clean) > 2
+
+            if similitud_completa < 0.65 and not contiene_titulo:
+                logger.warning(f"⚠️  Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
+            else:
+                data["api_data"] = {
+                    "source": "MusicBrainz",
+                    "official_title": api_result.get("title"),
+                    "author": api_result.get("artist"),
+                    "date": api_result.get("date"),
+                    "score": api_result.get("score") 
+                }
+
+    def _scan_software(self, data: dict, filename: str, technical_target: str):
+        internal_name = data.get("internal_representative")
+        target_info = f"-> [{internal_name}]" if internal_name else ""
+
+        office_macros = {
+            ".xlsm", ".xlsb", ".docm", ".pptm", ".dotm", ".ppsm", ".potm", ".xltm", ".xlam",
+            ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk", ".pdf"
+        }
+
+        extension = data.get("extension", "").lower()
+        if extension in office_macros:
+             logger.warning(f"🛡️  [Seguridad] {filename} contiene Macros de Office!! Lo trataré como ejecutable para triaje preventivo...")
+
+        logger.info(f"💾  Software/Archivo comprimido detectado {target_info}. Iniciando triaje de seguridad con VirusTotal...")
+
+        if technical_target:
+            vt_result = self.virustotal.scan_software(technical_target)
+
+            if vt_result:
+                stats = vt_result["stats"]
+                results = vt_result["results"]
+                file_hash = vt_result["hash"]
+                
+                malicious = stats.get("malicious", 0)
+                suspicious = stats.get("suspicious", 0)
+
+                TOP_ANTIVIRUS = [
+                    "Microsoft", "Kaspersky", "ESET-NOD32", "BitDefender", 
+                    "Symantec", "Sophos", "TrendMicro", "FireEye", "CrowdStrike"
+                ]
+                
+                top_threats = []
+                for engine in TOP_ANTIVIRUS:
+                    res = results.get(engine)
+                    if res and res.get("category") == "malicious":
+                        top_threats.append(engine)
+
+                if top_threats:
+                    veredicto = f"\033[91mMALICIOUS !!! (Detected by: {', '.join(top_threats)})\033[0m"
+                elif malicious == 0 and suspicious == 0:
+                    veredicto = "\033[92mSAFE\033[0m"
+                elif 1 <= malicious <= 5:
+                    veredicto = "\033[93mSUSPICIOUS\033[0m"
+                elif malicious > 5:
+                    veredicto = "\033[91mMALICIOUS\033[0m"
+                else:
+                    veredicto = "\033[93mSUSPICIOUS\033[0m"
+                
+                vt_url = f"https://www.virustotal.com/gui/file/{file_hash}" if stats.get("suspicious") != -1 else None
+
+                data["api_data"] = {
+                    "source": "VirusTotal",
+                    "official_title": filename,
+                    "veredicto": veredicto,
+                    "malicious_count": malicious,
+                    "suspicious_count": suspicious,
+                    "top_hits": top_threats,
+                    "url": vt_url
+                }
+                
+                if stats.get("suspicious") == -1:
+                    data["api_data"]["veredicto"] = "\033[93mUNKNOWN (Not found in VT)\033[0m"
+        else:
+            logger.warning("⚠️  No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
+
+    def _log_metadata_card(self, data: dict):
         if data.get("api_data"):
-
             ad = data["api_data"]
-
-            # Imprimimos la tarjeta de metadatos
             logger.info(f"✅ ¡Metadatos Encontrados/Analizados en {ad['source']}!")
-
             logger.info(f"    - Título: {ad.get('official_title')}")
-
             if ad.get("date"):
                logger.info(f"    - Fecha/Año: {ad['date']}")
             if ad.get("author"):
@@ -443,23 +348,12 @@ class MetadataEngine:
             if ad.get("score"):
                 logger.info(f"    - Relevancia/Nota: {ad['score']}")
             
-            # Formato especial para VirusTotal
-            if ad.get("veredicto"): # Si existe veredicto, es que es un software
+            if ad.get("veredicto"):
                 logger.info(f"    - Seguridad: {ad['veredicto']}")
                 if ad.get("url"):
                     logger.info(f"    - Informe VT: {ad['url']}")
-
         else:
             logger.info("⚠️  No se obtuvieron metadatos oficiales de las APIs.")
-
-        # Guardamos en caché si tenemos la instancia de BD y el hash (para el futuro)
-        if self.db and ed2k_hash:
-            self.db.set_metadata_cache(ed2k_hash, data)
-
-        # Devolvemos el diccionario final con toda la información recopilada
-        return data
-
-
 
 
     # Método privado para obtener el título alternativo

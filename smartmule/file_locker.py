@@ -61,10 +61,10 @@ def _is_single_file_locked(file_path: Path) -> bool:
     """Implementación interna para un solo archivo físico."""
     
     try:
-        # Intento abrir el archivo en modo lectura binaria. 
-        # Si otro proceso lo tiene bloqueado, Windows lanzará PermissionError.
-        with open(file_path, "rb") as f:
-            pass
+        # Intentamos abrir el archivo en modo lectura binaria y cerrarlo inmediatamente.
+
+        # En Windows, si otro proceso (como eMule) tiene el archivo bloqueado, esta operación lanzará un PermissionError (Sharing Violation).
+        open(file_path, "rb").close()
         return False
 
     except PermissionError:

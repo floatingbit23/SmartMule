@@ -4,6 +4,7 @@ import logging
 import contextlib 
 from io import StringIO # Es una librería que permite capturar la salida de un programa
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("SmartMule.inspector") 
 
@@ -61,147 +62,154 @@ MEDIA_MAPPING = {
     ".slk": "software" # SYLK (Symbolic Link) File
 }
 
-# Función para inspeccionar archivos comprimidos
+# Aplicamos el principio de Responsabilidad Única (Single Responsibility Principle)
+# Separamos la lógica de extracción de la lógica de análisis
+
+# Separamos la logica de extraccion en funciones individuales (ZIP nativo vs otros formatos (RAR, 7Z, etc.))
+
+def _list_zip(filepath: str) -> list[str]:
+    """Extrae la lista de archivos de un ZIP. Lanza PermissionError si está cifrado."""
+    file_list = []
+    with zipfile.ZipFile(filepath, 'r') as z:
+        for zinfo in z.infolist():
+            # El bit 0 del flag indica cifrado en el estándar ZIP
+            if zinfo.flag_bits & 0x1:
+                raise PermissionError("ZIP cifrado")
+            file_list.append(zinfo.filename)
+    return file_list
+
+
+def _list_generic(filepath: str) -> list[str]:
+    """Usa patool para listar archivos de otros formatos (.rar, .7z, etc)."""
+    output_buffer = StringIO()
+    # patool imprime a stdout, así que lo capturamos
+    with contextlib.redirect_stdout(output_buffer):
+        patoolib.list_archive(filepath)
+    return output_buffer.getvalue().splitlines()
+
+
+def _analyze_file_list(file_list: list[str]) -> tuple[Optional[str], list[str]]:
+
+    """Identifica el tipo de medio principal y detecta archivos potencialmente peligrosos."""
+
+    detected_media = None
+    dangerous_files = []
+    
+    for fname in file_list:
+        fname_lower = fname.lower().strip()
+        
+        # 1. Comprobamos si es una extensión peligrosa
+        if any(fname_lower.endswith(dext) for dext in DANGEROUS_EXTS):
+            dangerous_files.append(fname)
+            
+        # 2. Identificamos el medio (video, audio, etc) solo si no tenemos uno ya
+        if not detected_media:
+            for mext, mtype in MEDIA_MAPPING.items():
+                if fname_lower.endswith(mext):
+                    detected_media = mtype
+                    break
+                    
+    return detected_media, dangerous_files
+
+
+# Contiene exclusivamente las reglas de negocio para determinar si un archivo es MALICIOUS, SUSPICIOUS o SAFE.
+def _calculate_verdict(path_name: str, expected_type: str, detected_media: Optional[str], 
+                       dangerous_files: list, file_list: list) -> dict:
+
+    """Aplica la lógica de seguridad y devuelve el veredicto final."""
+
+    has_dangerous = len(dangerous_files) > 0
+    
+    # 1. CASO CRÍTICO: Suplantación (Ejecutables donde no debería haberlos)
+    if has_dangerous and expected_type not in ["software", "games"]:
+        logger.critical(f"💀 [Inspector] ¡SUPLANTACIÓN! {path_name} (esperado {expected_type}) contiene ejecutables.")
+        return {"status": "MALICIOUS", "detected_media": "software", "representative": dangerous_files[0]}
+
+    # 2. CASO CRÍTICO: Malware en documentos
+    if has_dangerous and expected_type == "documents":
+        logger.critical("💀 [Inspector] ¡MALWARE! Documento contenedor de scripts detectado.")
+        return {"status": "MALICIOUS", "detected_media": "software"}
+
+    # 3. CASO INFORMATIVO: Software legítimo
+    if has_dangerous:
+        logger.info(f"✅ [Inspector] Ejecutables en contenedor de {expected_type}. Permitido por contexto.")
+    else:
+        logger.info(f"✅ [Inspector] Contenedor limpio. Contiene {len(file_list)} elementos.")
+
+    if detected_media:
+        logger.info(f"📼 [Inspector] Detectado contenido principal de tipo: {detected_media}")
+    else:
+        logger.warning("⚠️ [Inspector] No se detectó contenido multimedia válido en el contenedor.")
+
+    # Seleccionamos un archivo representativo para el usuario (priorizando peligrosos para visibilidad)
+    representative = None
+    if dangerous_files:
+        representative = dangerous_files[0]
+    elif file_list:
+        representative = file_list[0]
+    
+    return {
+        "status": "SAFE", 
+        "detected_media": detected_media, 
+        "representative": representative
+    }
+
+
 def inspect_archive(filepath: str, expected_type: str = "unknown") -> dict:
 
     """
-    Inspecciona contenedores (.zip, .rar, .7z...) para listar su contenido. No extrae datos, solo lee el índice por motivos de seguridad y velocidad.
+    Orquestador de la inspección de archivos comprimidos. Extrae la lista de archivos y delega el análisis de seguridad.
     
     Args:
         filepath: Ruta del archivo.
-        expected_type: Tipo de medio que esperamos encontrar (determinado por IA o Regex).
-
-    Devuelve un diccionario con:
-    - "status": "SAFE" | "SUSPICIOUS" | "MALICIOUS" | "ERROR"
-    - "detected_media": "video", "audio", "book", "software", "games", "documents" o None
+        expected_type: Tipo de medio que esperamos encontrar.
+        
+    Returns:
+        dict: Resultado con status, medio detectado y representante.
     """
 
-    path = Path(filepath) 
-    ext = path.suffix.lower() 
-    
-    file_list = [] # Lista vacía de archivos dentro del contenedor
-
-    status = "SAFE" # Estado inicial del archivo (seguro por defecto)
+    path = Path(filepath)
+    ext = path.suffix.lower()
     
     try:
 
-        if ext == ".zip":
+        # Paso 1: Obtención de la lista de archivos
+        try:
 
-            with zipfile.ZipFile(filepath, 'r') as z: # Abro el archivo ZIP en modo lectura
-                 
-                for zinfo in z.infolist(): # Recorro los archivos dentro del ZIP
-                    
-                    # Si el bit índice 0 del flag está a 1, el archivo está cifrado.
-
-                    if zinfo.flag_bits & 0x1: # operador BITWISE AND para aislar el bit 0, llamado Encyption Flag
-                        # (si es 1 = cifrado, si es 0 = no cifrado)
-                        logger.warning(f"🔒  [Inspector] Archivo ZIP cifrado con contraseña: {path.name}")
-                        return {"status": "SUSPICIOUS", "detected_media": None}
-                    
-                    file_list.append(zinfo.filename) # Agrego a la lista de archivos
-                    
-        else: # .rar, .7z, .tar, etc. vía patool
-
-            logger.info(f"🔎  [Inspector] Escaneando contenedor {path.name}...")
-            
-            output_buffer = StringIO() # Buffer para capturar la salida de patool
-
-            try:
-
-                # list_archive imprime por pantalla, por lo que redirigimos stdout a nuestro buffer.
-                with contextlib.redirect_stdout(output_buffer):
-                    patoolib.list_archive(filepath)
-                    
-                output_str = output_buffer.getvalue()
-                
-                # patool imprime una línea por archivo, entre otra info de cabecera
-                lines = output_str.splitlines()
-
-                for line in lines: # Recorro las líneas
-
-                    line = line.strip() # Elimino espacios en blanco al inicio y al final
-
-                    # Si una línea termina en alguna de las extensiones conocidas, consideramos que es un archivo.
-                    # Hacemos esto extrayendo todas las "palabras" que parezcan archivos
-                    # Sin embargo, una forma robusta es simplemente buscar las extensiones directamente en todo el texto del listing.
-                    file_list.append(line)
-                    
-            except patoolib.util.PatoolError as e:
-
-                # patool lanza excepción si el archivo requiere contraseña para listar (como los RAR con cabecera cifrada) o si falla al abrir.
-                err_msg = str(e).lower()
-
-                # Si el mensaje de error contiene "password", "encrypt" o "checksum error", es que el archivo está cifrado o corrupto
-                if "password" in err_msg or "encrypt" in err_msg or "checksum error" in err_msg: 
-                    logger.warning(f"🔒 [Inspector] Archivo cifrado y/o corrupto detectado ({ext}): {path.name}")
-                    return {"status": "SUSPICIOUS", "detected_media": None}
-                
-                # Si no es ninguno de los casos anteriores, es un error de patool
-                logger.error(f"❌ [Inspector] Error listando {path.name}: {e}")
-                return {"status": "ERROR", "detected_media": None}
+            # Si es un ZIP, uso el método nativo de Python. Si no, uso patool.
+            if ext == ".zip":
+                file_list = _list_zip(filepath)
+            else:
+                file_list = _list_generic(filepath)
 
 
-        # == EVALUACIÓN DE INCONSISTENCIA SEMÁNTICA ==
+        # Manejo de errores de extracción (archivos ZIP cifrados o corruptos)
+        except PermissionError:
 
-        detected_media = None # Variable para almacenar el Media Type detectado
-        has_dangerous = False # Flag para detectar archivos peligrosos
-        dangerous_files = [] # Lista para almacenar archivos peligrosos
-        
-        for fname in file_list: # Recorro los archivos dentro de la lista
+            # Captura de ZIPs con contraseña
+            logger.warning(f"🔒 [Inspector] Archivo ZIP cifrado: {path.name}")
+            return {"status": "SUSPICIOUS", "detected_media": None}
 
-            fname_lower = fname.lower() # Convierto el nombre del archivo a minúsculas
-            
-            # Buscar extensiones peligrosas (.exe, .vbs...)
-            for dext in DANGEROUS_EXTS:
-                if fname_lower.endswith(dext): # Si el nombre del archivo termina en una extensión peligrosa
-                    has_dangerous = True # Activo el flag de archivos peligrosos
-                    dangerous_files.append(fname)
-                    break
-                    
+        # Captura de errores de patool o archivos corruptos/cifrados
+        except Exception as e:
 
-            # Buscar medios verdaderos si no hemos encontrado aún
-            if not detected_media:
-                for mext, mtype in MEDIA_MAPPING.items(): # Recorro el diccionario de mapeo
-                    # mext = extensión, mtype = Media Type
-                    if fname_lower.endswith(mext): # Si el nombre del archivo termina en una extensión válida
-                        detected_media = mtype # Le asigno el Media Type correspondiente
-                        break
-                        
-        # --- LÓGICA DE VEREDICTO POR CONTEXTO ---
+            err_msg = str(e).lower()
 
-        # Si NO esperamos software ni juegos, pero hay ejecutables -> MALICIOUS (Suplantación)
+            # Identificamos si es por cifrado/corrupción o un error genérico
+            if any(word in err_msg for word in ["password", "encrypt", "checksum"]):
 
-        if has_dangerous and expected_type not in ["software", "games"]:
-             logger.critical(f"💀 [Inspector] ¡SUPLANTACIÓN! {path.name} (que debería ser {expected_type}) contiene ejecutables.")
-             return {"status": "MALICIOUS", "detected_media": "software", "representative": dangerous_files[0]}
-             
-        # Si esperamos juegos o software, el ejecutable es NORMAL, pero por seguridad lo dejamos bajo sospecha o revisión si son muchos
+                logger.warning(f"🔒 [Inspector] Archivo cifrado/corrupto ({ext}): {path.name}")
+                return {"status": "SUSPICIOUS", "detected_media": None}
 
-        if has_dangerous and expected_type in ["software", "games"]:
-             logger.info(f"✅ [Inspector] Ejecutables encontrados en contenedor de {expected_type}. Permitido por contexto.")
-             # No es Malicious, dejamos que VirusTotal decida después.
-             
-        # Los documentos NO deben tener ejecutables dentro de sus contenedores (si comprimidos)
-        
-        if has_dangerous and expected_type == "documents":
-             logger.critical(f"💀 [Inspector] ¡MALWARE! Documento contenedor de scripts/ejecutables detectado.")
-             return {"status": "MALICIOUS", "detected_media": "software"}
+            # Si el error no es de cifrado, lo registramos como error genérico
+            logger.error(f"❌ [Inspector] Error procesando {path.name}: {e}")
+            return {"status": "ERROR", "detected_media": None}
 
-        # Si no se encontró ningún archivo peligroso
-        logger.info(f"✅ [Inspector] Contenedor limpio. Contiene {len(file_list)} elementos.")
-        
-        # Si se detectó un tipo de medio
-        if detected_media:
-            logger.info(f"📼 [Inspector] Detectado contenido principal de tipo: {detected_media}")
-            
-        # Si no se encontró ningún tipo de medio
-        else:
-            logger.warning(f"⚠️ [Inspector] No se detectó contenido multimedia válido en el contenedor.")
-            
-        # Devolvemos el estado (seguro), el tipo de medio detectado y el archivo representante (si hay)
-        representative = dangerous_files[0] if dangerous_files else (file_list[0] if file_list else None)
-        return {"status": "SAFE", "detected_media": detected_media, "representative": representative}
+        # Paso 2: Análisis de contenido y Veredicto
+        detected_media, dangerous_files = _analyze_file_list(file_list)
+        return _calculate_verdict(path.name, expected_type, detected_media, dangerous_files, file_list)
 
+    # Si fallo crítico en la función inspect_archive
     except Exception as e:
-        logger.error(f"❌ [Inspector] Fallo crítico inspeccionando {path.name}: {e}")
+        logger.error(f"❌ [Inspector] Fallo crítico en {path.name}: {e}")
         return {"status": "ERROR", "detected_media": None}
