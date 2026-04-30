@@ -521,23 +521,38 @@ EJEMPLOS DE USO:
 
     # --- AUTO-INSTALACIÓN DE HERRAMIENTAS (Self-Provisioning) ---
     try:
-        launcher_src = Path("Purga_Interactiva.bat")
+        # Detectamos el SO para desplegar solo el lanzador adecuado
+        if sys.platform == "win32":
+            launchers = [("Purga_Interactiva.bat", "Purga_Interactiva.bat")]
+        else:
+            launchers = [("purga_interactiva.sh", "purga_interactiva.sh")]
         lib_path = Path(LIBRARY_PATH)
-        if launcher_src.exists() and lib_path.exists():
-            launcher_dest = lib_path / "Purga_Interactiva.bat"
-            
-            # Leemos la plantilla, reemplazamos la ruta y guardamos en el destino
-            # Esto evita tener rutas hardcodeadas en el archivo .bat original.
-            bat_content = launcher_src.read_text(encoding="utf-8")
-            if "TEMPLATE_PROJECT_PATH" in bat_content:
-                new_content = bat_content.replace("TEMPLATE_PROJECT_PATH", str(PROJECT_PATH))
-                launcher_dest.write_text(new_content, encoding="utf-8")
-                # print(f"[i] Herramienta de purga desplegada dinamicamente en: {launcher_dest}")
+        if lib_path.exists():
+            for src_name, dest_name in launchers:
+                src_file = BASE_DIR / src_name
+                if src_file.exists():
+                    dest_file = lib_path / dest_name
+                    
+                    # Leemos la plantilla, reemplazamos la ruta y guardamos en el destino
+                    content = src_file.read_text(encoding="utf-8")
+                    if "TEMPLATE_PROJECT_PATH" in content:
+                        new_content = content.replace("TEMPLATE_PROJECT_PATH", str(PROJECT_PATH))
+                        dest_file.write_text(new_content, encoding="utf-8")
+                        
+                        # Si es un script de Linux y no estamos en Windows, damos permisos de ejecución
+                        if dest_name.endswith(".sh") and sys.platform != "win32":
+                            try:
+                                dest_file.chmod(0o755)
+                            except Exception:
+                                pass
+
     except Exception as e:
-        print(f"[!] No se pudo desplegar el lanzador en la biblioteca: {e}")
+        print(f"[!] No se pudo desplegar los lanzadores en la biblioteca: {e}")
+
 
     # Registramos que esta instancia es la oficial
     write_pid()
+
 
     # Configuración de Logs (Nivel DEBUG si se solicita vía flag)
     log_level = "DEBUG" if args.debug else None
@@ -579,11 +594,14 @@ EJEMPLOS DE USO:
 
     # Registramos el manejador de señales para diversos sistemas y contextos
     signal.signal(signal.SIGINT, handle_shutdown) # Ctrl+C
+
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, handle_shutdown) # Kill estándar Linux/Docker
+
     else:
+        # En Windows, Ctrl+C no es suficiente para detener el programa, por lo que usamos Ctrl+Break
         try:
-            signal.signal(signal.SIGBREAK, handle_shutdown) # Ctrl+Break en Windows
+            signal.signal(signal.SIGBREAK, handle_shutdown)
         except AttributeError:
             pass
 
