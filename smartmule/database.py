@@ -397,18 +397,21 @@ class HashDatabase:
     def get_stats(self) -> dict:
 
         """
-        Devuelve un resumen estadístico: total de archivos y conteo por categoría.
+        Devuelve un resumen estadístico: total de archivos, conteo por categoría y tamaño acumulado.
         """
         
         stats = {
             "total": 0,
+            "total_size": 0,
             "categories": {}
         }
 
         try:
-            # 1. Obtener total
-            cursor = self._conn.execute("SELECT COUNT(*) FROM files")
-            stats["total"] = cursor.fetchone()[0]
+            # 1. Obtener total y tamaño acumulado
+            cursor = self._conn.execute("SELECT COUNT(*), SUM(file_size) FROM files")
+            row = cursor.fetchone()
+            stats["total"] = row[0]
+            stats["total_size"] = row[1] or 0
 
             # 2. Obtener conteo por categoría
             cursor = self._conn.execute("SELECT media_type, COUNT(*) FROM files GROUP BY media_type ORDER BY COUNT(*) DESC")

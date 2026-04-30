@@ -373,9 +373,9 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
 
 
 
-def list_files() -> None:
+def show_stats() -> None:
     """
-    Lista todos los archivos registrados en la base de datos y muestra estadísticas.
+    Muestra el inventario de la biblioteca y estadísticas de almacenamiento.
     """
     db = HashDatabase(DB_PATH)
     try:
@@ -414,6 +414,10 @@ def list_files() -> None:
         print("\n---------------------------------------------------")
         print(f"  📊 Total de archivos: {stats['total']}")
         
+        # Calculamos el tamaño total en GB (Bytes / 1024^3)
+        total_gb = stats.get("total_size", 0) / (1024**3)
+        print(f"  💾 Espacio total organizado: {total_gb:.2f} GB")
+        
         if stats["categories"]:
             print("  📂 Desglose por categorías:")
             for cat, count in stats["categories"].items():
@@ -426,6 +430,149 @@ def list_files() -> None:
         print(f"[ERROR] Error al listar archivos: {e}")
     finally:
         db.close()
+
+
+def show_config() -> None:
+    """
+    Muestra la configuración actual cargada en SmartMule de forma legible.
+    """
+    from smartmule import config
+    
+    print("\n===================================================")
+    print("          SmartMule: Configuración Activa")
+    print("===================================================")
+    
+    print("\n📂  RUTAS DEL SISTEMA:")
+    print(f"   - Proyecto: {config.PROJECT_PATH}")
+    print(f"   - Incoming: {config.INCOMING_PATH}")
+    print(f"   - Library:  {config.LIBRARY_PATH}")
+    print(f"   - Database: {config.DB_PATH}")
+    
+    print("\n📊  PARAMETROS DE OPERACION:")
+    print(f"   - Modo Organizador: {config.ORGANIZER_MODE.upper()}")
+    print(f"   - Debounce (FS):   {config.DEBOUNCE_SECONDS}s")
+    print(f"   - Log Level:       {config.LOG_LEVEL}")
+    
+    print("\n🤖 INTELIGENCIA ARTIFICIAL:")
+
+    # Si se usa el LLM local, se muestra su URL. Si no, se muestra que se está usando Gemini.
+   
+    status_llm = "✅  ACTIVO (Local)" if config.USE_LOCAL_LLM else "☁️  CLOUD (Gemini)"
+    
+    print(f"   - Modo IA: {status_llm}")
+
+    if config.USE_LOCAL_LLM:
+        print(f"   - URL Local:  {config.LOCAL_LLM_URL}")
+    
+    print("\n🔑  API KEYS (Estado):")
+    
+    # Método para enmascarar claves (por seguridad)
+    def mask(key):
+        if not key: return "❌  No configurada"
+
+        # Si es una clave corta (como la de Hugging Face en modo local) se muestra entera.
+        if len(key) < 10: return "✅  Configurada (Oculta)"
+        
+        return f"✅  Configurada ({key[:4]}...{key[-4:]})"
+    
+    # Imprime las claves enmascaradas.
+    print(f"   - TMDB Token:    {mask(config.TMDB_BEARER_TOKEN)}")
+    print(f"   - Gemini Key:    {mask(config.GEMINI_API_KEY)}")
+    print(f"   - VirusTotal:    {mask(config.VIRUSTOTAL_API_KEY)}")
+    
+    print("\n===================================================\n")
+
+
+def show_status() -> None:
+    """
+    Muestra un estado detallado del servicio y herramientas de SmartMule.
+    """
+
+    import shutil
+    import subprocess
+    from smartmule import config
+    
+    print("\n===================================================")
+    print("          SmartMule: Estado del Sistema")
+    print("===================================================")
+    
+    # 1. Estado del Servicio
+    pid = get_active_pid()
+    if pid:
+        print(f"\n[i] SERVICIO: Activo (PID: {pid})")
+    else:
+        print("\n[!] SERVICIO: Inactivo")
+        
+    # 2. Verificación de Herramientas Externas
+    print("\n[i] DEPENDENCIAS:")
+    
+    # Función para verificar si una herramienta está instalada
+    def check_tool(name, cmd):
+
+        path = shutil.which(cmd) # Busca la herramienta en el PATH del sistema
+        
+        # Muestra el estado de la herramienta
+        status = f"✅  Encontrado ({path})" if path else "❌  NO ENCONTRADO (Instalalo para soporte completo)"
+        print(f"   - {name:10}: {status}")
+        
+    check_tool("FFmpeg", "ffprobe")
+    check_tool("7-Zip", "7z")
+    
+    # 3. Verificación de Rutas y Permisos
+    print("\n📂  ESTADO DE RUTAS:")
+    def check_path(name, path):
+        if not path.exists():
+            status = "❌  NO EXISTE"
+        else:
+            readable = os.access(path, os.R_OK)
+            writable = os.access(path, os.W_OK)
+            if readable and writable:
+                status = "✅  OK (Lectura/Escritura)"
+            elif readable:
+                status = "⚠️  Solo Lectura"
+            else:
+                status = "❌  SIN ACCESO"
+        
+        print(f"   - {name:10}: {status}")
+        
+    check_path("Incoming", config.INCOMING_PATH)
+    check_path("Library", config.LIBRARY_PATH)
+    check_path("Database", config.DB_PATH.parent) # Comprobamos la carpeta oculta de la DB
+    
+    print("\n===================================================\n")
+
+
+def show_last_logs(lines: int = 30) -> None:
+    """
+    Muestra las últimas N líneas del archivo de log de forma eficiente.
+    """
+    from smartmule.config import BASE_DIR
+    import collections
+    
+    log_file = BASE_DIR / "smartmule.log"
+    
+    if not log_file.exists():
+        print("\n[!] Aun no se ha generado el archivo 'smartmule.log'.")
+        return
+
+    print(f"\n[i] Mostrando las ultimas {lines} lineas del log:\n")
+    print("-" * 70)
+    
+    try:
+        # Usamos deque con maxlen para leer solo las últimas líneas sin cargar el archivo entero en RAM
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+
+            # Leemos las ultimas N lineas.
+            last_lines = collections.deque(f, maxlen=lines)
+
+            for line in last_lines:
+                # Quitamos el salto de línea doble que pueda venir del log
+                print(line.strip())
+
+    except Exception as e:
+        print(f"❌ Error al leer el log: {e}")
+    
+    print("-" * 70 + "\n")
 
 
 def main() -> None:
@@ -451,11 +598,15 @@ COMANDOS DE SERVICIO:
   stop              Detiene la instancia activa de SmartMule de forma segura.
 
 HERRAMIENTAS ADMINISTRATIVAS:
-  --list            Muestra un resumen detallado de la biblioteca.
-  --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
-  --all             (Purga) Selecciona automáticamente todos los resultados.
-  --no-preserve     (Purga) Borra archivos físicos sin pedir confirmación.
+  --stats           Muestra un resumen detallado e inventario de la biblioteca.
+  --config          Muestra la configuración activa (rutas, APIs, etc.).
+  --status          Realiza un chequeo de salud y dependencias del sistema.
+  --log [N]         Muestra las ultimas N lineas del log (por defecto 30).
+  --pid             Muestra el PID del proceso activo de SmartMule.
   --debug           Habilita logs detallados (DEBUG) para diagnóstico.
+    --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
+    --all                 (Purga) Selecciona automáticamente todos los resultados.
+    --no-preserve         (Purga) Borra archivos físicos sin pedir confirmación.
   -h, --help        Muestra este manual de usuario.
 """,
         formatter_class=argparse.RawTextHelpFormatter,
@@ -464,9 +615,13 @@ HERRAMIENTAS ADMINISTRATIVAS:
 EJEMPLOS DE USO:
   > python main.py start              # Iniciar SmartMule
   > python main.py stop               # Detener SmartMule
-  > python main.py --list             # Ver inventario
+  > python main.py --stats            # Ver inventario y estadísticas
+  > python main.py --status           # Chequear salud del sistema
+  > python main.py --config           # Ver configuración activa
+  > python main.py --log 50           # Ver ultimas 50 lineas del log
+  > python main.py --pid              # Ver PID activo
   > python main.py --purge "Matrix"   # Limpiar archivos por búsqueda
-"""
+\n"""
     )
     
     # Personalizamos el mensaje de error para que sugiera el uso de --help
@@ -484,7 +639,11 @@ EJEMPLOS DE USO:
 
     # Interfaz de Flags modernas
     parser.add_argument("--purge", nargs="?", const=True, help=argparse.SUPPRESS)
-    parser.add_argument("--list", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--stats", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--config", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--status", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--log", nargs="?", type=int, const=30, help=argparse.SUPPRESS)
+    parser.add_argument("--pid", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-preserve", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
@@ -496,9 +655,34 @@ EJEMPLOS DE USO:
         stop_daemon()
         sys.exit(0)
 
-    # 2. Acción LIST: Inventario de la biblioteca
-    if args.list:
-        list_files()
+    # 2. Acción STATS: Inventario y estadísticas
+    if args.stats:
+        show_stats()
+        sys.exit(0)
+
+    # 2.2 Acción CONFIG: Mostrar configuración
+    if args.config:
+        show_config()
+        sys.exit(0)
+
+    # 2.3 Acción STATUS: Chequeo de salud
+    if args.status:
+        show_status()
+        sys.exit(0)
+    
+    # 2.5 Acción LOG: Últimas N líneas del Log
+    if args.log is not None:
+        num_lines = args.log if isinstance(args.log, int) else 30
+        show_last_logs(num_lines)
+        sys.exit(0)
+
+    # 2.7 Acción PID: Mostrar PID activo
+    if args.pid:
+        pid = get_active_pid()
+        if pid:
+            print(f"\n[i] SmartMule está activo (PID: {pid})\n")
+        else:
+            print("\n[!] SmartMule no está en ejecución.\n")
         sys.exit(0)
 
     # 3. Acción PURGE: Herramienta administrativa

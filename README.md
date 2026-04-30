@@ -120,16 +120,23 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
 
     ![stop_pid](/images/stop_pid.png)
 
-*   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log` (en la raíz del proyecto). Puedes seguirlo en tiempo real en la terminal ejecutando:
+*   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log`. Puedes ver las últimas líneas rápidamente con:
+    ```bash
+    python main.py --log      # Muestra las últimas 30 líneas (por defecto)
+    python main.py --log 100  # Muestra las últimas 100 líneas
+    ```
+    O seguirlo en tiempo real en Windows:
     ```powershell
     Get-Content smartmule.log -Wait -Encoding UTF8
     ```
 
     ![alt text](/images/logs.png)
 
-*   **Inventario y Estadísticas**: Para ver rápidamente qué archivos tienes registrados en la biblioteca y el desglose por categorías (Películas, Libros, etc.), usa la flag `--list`:
+*   **Inventario y Estadísticas**: Para ver rápidamente qué archivos están registrados en la biblioteca, el desglose por categorías (Películas, Libros, etc.) y el tamaño total ocupado, usa el flag `--stats`. Para verificar el estado de salud y dependencias del sistema, usa `--status`. Si quieres verificar qué rutas y APIs tienes activas, usa `--config`:
     ```bash
-    python main.py --list
+    python main.py --stats     # Ver estadísticas
+    python main.py --status    # Chequear salud del sistema
+    python main.py --config    # Ver configuración activa
     ```
 
     ![alt text](/images/inventory.png)
@@ -165,9 +172,12 @@ Si quieres que el comando `smartmule` funcione tanto en **PowerShell** como en *
 Una vez configurado el alias, podrás usar desde cualquier terminal:
 *   `smartmule start` (Arranca el motor de SmartMule)
 *   `smartmule stop` (Detiene el servicio)
-*   `smartmule --list` (Ver inventario de la biblioteca)
+*   `smartmule --stats` (Ver inventario y estadísticas de almacenamiento)
+*   `smartmule --status` (Ver salud y dependencias del sistema)
+*   `smartmule --config` (Ver rutas y configuración de APIs activas)
 *   `smartmule --purge "Nombre"` (Borrar archivos)
 *   `smartmule --debug` (Arranca con logs detallados de IA)
+*   `smartmule --pid`  (Muestra el PID del proceso activo)
 
 ---
 

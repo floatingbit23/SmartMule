@@ -119,15 +119,22 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
 
     ![stop_pid](/images/stop_pid.png)
 
-*   **Auditing**: All silent activity will be recorded in the `smartmule.log` file (in the project root). You can follow it in real-time in the terminal by running:
+*   **Auditing**: All silent activity will be recorded in the `smartmule.log` file. You can quickly see the last lines with:
+    ```bash
+    python main.py --log      # Shows the last 30 lines (default)
+    python main.py --log 100  # Shows the last 100 lines
+    ```
+    Or follow it in real-time on Windows:
     ```powershell
     Get-Content smartmule.log -Wait -Encoding UTF8
     ```
     ![alt text](/images/logs.png)
 
-*   **Inventory and Statistics**: To quickly see which files are registered in the library and the breakdown by category (Movies, Books, etc.), use the `--list` flag:
+*   **Inventory and Statistics**: To quickly see which files are registered in the library, the breakdown by category, and the total storage used, use the `--stats` flag. To check system health and dependencies, use `--status`. To check your active paths and APIs, use `--config`:
     ```bash
-    python main.py --list
+    python main.py --stats     # View statistics
+    python main.py --status    # Check system health
+    python main.py --config    # View active configuration
     ```
     ![alt text](/images/inventory.png)
 
@@ -155,11 +162,14 @@ To avoid typing the virtual environment path every time you want to use the CLI,
 ### Available Commands (via Alias)
 
 Once the alias is configured, you will be able to use from any terminal:
-*   `smartmule start` (Start the SmartMule engine)
-*   `smartmule stop` (Stop the service)
-*   `smartmule --list` (View library inventory)
+*   `smartmule start` (Starts the SmartMule engine)
+*   `smartmule stop` (Stops the service)
+*   `smartmule --stats` (View library inventory and storage statistics)
+*   `smartmule --status` (View system health and dependencies)
+*   `smartmule --config` (View active paths and API configuration)
 *   `smartmule --purge "Name"` (Delete files)
 *   `smartmule --debug` (Start with detailed AI logs)
+*   `smartmule --pid`  (Shows the active process PID)
 
 ---
 
