@@ -30,11 +30,11 @@ echo ""
 echo -e "${YELLOW}[PROCESANDO]${NC} Ejecutando purga para: \"${query}\""
 echo ""
 
-# Navegamos a la carpeta del proyecto (Inyectado automaticamente por SmartMule)
-cd "TEMPLATE_PROJECT_PATH" || exit
+# Navegamos a la carpeta del proyecto de forma dinámica
+cd "$(dirname "$0")" || exit
 
-# Ejecutamos el comando de SmartMule usando python3
-python3 main.py --purge "$query"
+# Ejecutamos el comando de SmartMule usando el python del entorno virtual
+./venv/bin/python3 main.py --purge "$query"
 
 echo ""
 echo -e "${CYAN}===================================================${NC}"
