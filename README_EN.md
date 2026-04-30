@@ -109,9 +109,11 @@ For file analysis and movie tie-breaking, SmartMule requires:
 
 SmartMule is designed to run once and remain monitoring permanently in a completely invisible manner.
 
-*   **Start (Invisible Mode)**: Double-click the `smartmule_launcher.vbs` file. This will launch the background process. I recommend creating a shortcut to this file and placing it in your *Windows Startup* folder (`shell:startup`) so it starts automatically when you turn on your PC.
+*   **Start (Invisible Mode)**: 
+    - **Windows**: Double-click the `smartmule_launcher.vbs` file. I recommend placing a shortcut in your *Startup* folder (`shell:startup`).
+    - **Linux**: Run `./smartmule_launcher.sh`. This script uses `nohup` to keep the process alive after closing the terminal.
 
-*   **Stop**: If you need to stop it, open any terminal (CMD or PowerShell) and run `python main.py stop`. SmartMule will detect the hidden process and close it cleanly.
+*   **Stop**: Run `python3 main.py stop`. SmartMule will detect the hidden process and close it cleanly.
 
     ![stop_pid](/images/stop_pid.png)
 
@@ -155,10 +157,13 @@ Use example:
     ```
     *Note: This command requires a text confirmation ("BORRAR TODO") for safety.*
 
-### 🚀 One-Click Purge (Windows)
-For extra convenience, SmartMule automatically deploys a tool called **`Purga_Interactiva.bat`** inside your library folder (`LIBRARY_PATH`). 
+### 🚀 One-Click Purge (Cross-platform)
+For extra convenience, SmartMule automatically deploys shortcut tools inside your library folder (`LIBRARY_PATH`):
 
-Just double-click it to search and delete files without having to open the terminal or remember CLI commands:
+*   **Windows**: Use **`Purga_Interactiva.bat`**.
+*   **Linux**: Use **`purga_interactiva.sh`**.
+
+Just run the appropriate file to search and delete files without having to open the terminal or remember CLI commands:
 ![alt text](images/purge_script.png)
 
 ---

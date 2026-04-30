@@ -523,9 +523,15 @@ EJEMPLOS DE USO:
     try:
         # Detectamos el SO para desplegar solo el lanzador adecuado
         if sys.platform == "win32":
-            launchers = [("Purga_Interactiva.bat", "Purga_Interactiva.bat")]
+            launchers = [
+                ("Purga_Interactiva.bat", "Purga_Interactiva.bat"),
+                ("smartmule_launcher.vbs", "smartmule_launcher.vbs")
+            ]
         else:
-            launchers = [("purga_interactiva.sh", "purga_interactiva.sh")]
+            launchers = [
+                ("purga_interactiva.sh", "purga_interactiva.sh"),
+                ("smartmule_launcher.sh", "smartmule_launcher.sh")
+            ]
         lib_path = Path(LIBRARY_PATH)
         if lib_path.exists():
             for src_name, dest_name in launchers:

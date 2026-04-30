@@ -110,9 +110,11 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando permanentemente de forma completamente invisible.
 
-*   **Arrancar (Modo Invisible)**: Haz doble clic en el archivo `smartmule_launcher.vbs`. Esto levantará el proceso en segundo plano. Recomiendo crear un acceso directo a este archivo y colocarlo en tu carpeta de *Autoinicio de Windows* (`shell:startup`) para que arranque solo al encender el PC.
+*   **Arrancar (Modo Invisible)**: 
+    - **Windows**: Haz doble clic en el archivo `smartmule_launcher.vbs`. Recomiendo colocar un acceso directo en tu carpeta de *Autoinicio* (`shell:startup`).
+    - **Linux**: Ejecuta `./smartmule_launcher.sh`. Este script usa `nohup` para que el proceso siga vivo aunque cierres la terminal.
 
-*   **Detener**: Si necesitas pararlo, abre una terminal cualquiera (CMD o PowerShell) y ejecuta `python main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
+*   **Detener**: Ejecuta `python3 main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
 
     ![stop_pid](/images/stop_pid.png)
 
@@ -158,10 +160,13 @@ Ejemplo de uso:
     ```
     *Nota: Este comando requiere una confirmación de texto (escribir "BORRAR TODO") por seguridad.*
 
-### 🚀 Purga en un solo clic (Windows)
-Para mayor comodidad, SmartMule despliega automáticamente una herramienta llamada **`Purga_Interactiva.bat`** dentro de tu carpeta de biblioteca (`LIBRARY_PATH`). 
+### 🚀 Purga en un solo clic (Multiplataforma)
+Para mayor comodidad, SmartMule despliega automáticamente herramientas de acceso directo dentro de tu carpeta de biblioteca (`LIBRARY_PATH`):
 
-Solo tienes que hacer doble clic en ella para buscar y eliminar archivos sin tener que abrir la terminal ni recordar comandos:
+*   **Windows**: Usa **`Purga_Interactiva.bat`**.
+*   **Linux**: Usa **`purga_interactiva.sh`**.
+
+Solo tienes que ejecutar el archivo correspondiente para buscar y eliminar archivos sin tener que recordar comandos complejos:
 ![alt text](images/purge_script.png)
 
 ---
