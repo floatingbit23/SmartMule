@@ -30,11 +30,8 @@ echo ""
 echo -e "${YELLOW}[PROCESANDO]${NC} Ejecutando purga para: \"${query}\""
 echo ""
 
-# Extraemos la ruta del proyecto desde el archivo .env
-PROJECT_DIR=$(grep "^PROJECT_PATH=" .env | cut -d '=' -f2)
-
-# Navegamos a la carpeta configurada
-cd "$PROJECT_DIR" || exit
+# Navegamos a la carpeta del proyecto (Inyectado automaticamente por SmartMule)
+cd "TEMPLATE_PROJECT_PATH" || exit
 
 # Ejecutamos el comando de SmartMule usando el python del entorno virtual
 ./venv/bin/python3 main.py --purge "$query"

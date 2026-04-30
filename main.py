@@ -519,6 +519,12 @@ EJEMPLOS DE USO:
         print(f"> Si estás trabajando desde Linux: kill {active_pid}")
         sys.exit(1)
 
+    # Validación crítica de entorno (permisos, existencia de carpetas)
+    if not validate_paths():
+        logger.error("[ERROR] Error en la configuracion de rutas. Abortando.")
+        remove_pid()
+        sys.exit(1)
+
     # --- AUTO-INSTALACIÓN DE HERRAMIENTAS (Self-Provisioning) ---
     try:
         # Detectamos el SO para desplegar solo el lanzador adecuado
@@ -555,10 +561,8 @@ EJEMPLOS DE USO:
     except Exception as e:
         print(f"[!] No se pudo desplegar los lanzadores en la biblioteca: {e}")
 
-
     # Registramos que esta instancia es la oficial
     write_pid()
-
 
     # Configuración de Logs (Nivel DEBUG si se solicita vía flag)
     log_level = "DEBUG" if args.debug else None
@@ -569,13 +573,7 @@ EJEMPLOS DE USO:
 |  El Daemon Inteligente P2P        |
 +===================================+"""
     print(f"\033[94m{banner}\033[0m\n")
- 
-    # Validación crítica de entorno (permisos, existencia de carpetas)
-    if not validate_paths():
-        logger.error("[ERROR] Error en la configuracion de rutas. Abortando.")
-        remove_pid()
-        sys.exit(1)
- 
+
     # Info de arranque
     logger.info(f"Carpeta Incoming:   {INCOMING_PATH}")
     logger.info(f"Carpeta Library:    {LIBRARY_PATH}")

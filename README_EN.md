@@ -110,7 +110,9 @@ For file analysis and movie tie-breaking, SmartMule requires:
 SmartMule is designed to run once and remain monitoring permanently in a completely invisible manner.
 
 *   **Start (Invisible Mode)**: 
+
     - **Windows**: Double-click the `smartmule_launcher.vbs` file. I recommend placing a shortcut in your *Startup* folder (`shell:startup`).
+    
     - **Linux**: Run `./smartmule_launcher.sh`. This script uses `nohup` to keep the process alive after closing the terminal.
 
 *   **Stop**: Run `python3 main.py stop`. SmartMule will detect the hidden process and close it cleanly.
@@ -128,6 +130,36 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
     python main.py --list
     ```
     ![alt text](/images/inventory.png)
+
+### Linux Alias
+
+To avoid typing the virtual environment path every time you want to use the CLI, you can create an alias in your terminal:
+
+1.  Open your configuration: `nano ~/.bashrc`
+2.  Paste this line at the end (adjust the path if necessary):
+    ```bash
+    alias smartmule='/home/user/SmartMule/venv/bin/python3 /home/user/SmartMule/main.py'
+    ```
+3.  Reload the configuration: `source ~/.bashrc`
+
+**Windows:**
+1.  Create a file named `smartmule.bat` in a folder that is in your `PATH` (e.g., `C:\Windows`).
+2.  Paste this content inside (adjust the paths to your installation):
+    ```batch
+    @echo off
+    C:\SmartMule\venv\Scripts\python.exe C:\SmartMule\main.py %*
+    ```
+
+3.  Done! Now you can use the simplified commands from any terminal.
+
+### Available Commands (via Alias)
+
+Once the alias is configured, you will be able to use from any terminal:
+*   `smartmule start` (Start the SmartMule engine)
+*   `smartmule stop` (Stop the service)
+*   `smartmule --list` (View library inventory)
+*   `smartmule --purge "Name"` (Delete files)
+*   `smartmule --debug` (Start with detailed AI logs)
 
 ---
 

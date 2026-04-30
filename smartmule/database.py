@@ -40,7 +40,7 @@ class HashDatabase:
     _CREATE_TABLE_SQL = """
         CREATE TABLE IF NOT EXISTS files (
             id           INTEGER PRIMARY KEY AUTOINCREMENT, -- Identificador único de cada registro
-            file_path    TEXT NOT NULL, -- Ruta completa del archivo
+            file_path    TEXT NOT NULL UNIQUE, -- Ruta completa del archivo (ÚNICA para evitar duplicados)
             file_name    TEXT NOT NULL, -- Nombre del archivo
             file_size    INTEGER NOT NULL, -- Tamaño del archivo en bytes
             fingerprint  TEXT NOT NULL DEFAULT '', -- Huella digital SHA256 del contenido

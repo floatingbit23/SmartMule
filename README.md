@@ -69,14 +69,14 @@ SmartMule permite elegir cómo se gestionan los archivos físicamente mediante l
 
 ## 🛠️ Requisitos del Sistema
 
-### 1. Dependencias de Python
+### Dependencias de Python
 
 Instala las librerías necesarias con:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Herramientas de Sistema (OBLIGATORIO)
+### Herramientas de Sistema (OBLIGATORIO)
 
 Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
@@ -111,7 +111,9 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando permanentemente de forma completamente invisible.
 
 *   **Arrancar (Modo Invisible)**: 
+
     - **Windows**: Haz doble clic en el archivo `smartmule_launcher.vbs`. Recomiendo colocar un acceso directo en tu carpeta de *Autoinicio* (`shell:startup`).
+    
     - **Linux**: Ejecuta `./smartmule_launcher.sh`. Este script usa `nohup` para que el proceso siga vivo aunque cierres la terminal.
 
 *   **Detener**: Ejecuta `python3 main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
@@ -131,7 +133,42 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
     ```
 
     ![alt text](/images/inventory.png)
- 
+
+### Alias en Linux
+
+Para evitar escribir la ruta del entorno virtual cada vez que quieras usar la CLI, puedes crear un alias en tu terminal:
+
+1.  Abre tu configuración: `nano ~/.bashrc`
+
+2.  Pega esta línea al final (ajusta la ruta si es necesario):
+    ```bash
+    alias smartmule='/home/user/SmartMule/venv/bin/python3 /home/user/SmartMule/main.py'
+    ```
+3.  Recarga la configuración: `source ~/.bashrc`
+
+### Alias en Windows
+
+Si quieres que el comando `smartmule` funcione tanto en **PowerShell** como en **CMD**:
+
+1.  Crea un archivo llamado `smartmule.bat` en una carpeta que esté en tu `PATH` (ej: `C:\Windows`).
+
+2.  Pega este contenido dentro (ajusta las rutas a tu instalación):
+    ```batch
+    @echo off
+    C:\SmartMule\venv\Scripts\python.exe C:\SmartMule\main.py %*
+    ```
+
+3.  ¡Listo! Ahora puedes usar los comandos simplificados desde cualquier terminal.
+
+### Comandos disponibles (vía Alias)
+
+Una vez configurado el alias, podrás usar desde cualquier terminal:
+*   `smartmule start` (Arranca el motor de SmartMule)
+*   `smartmule stop` (Detiene el servicio)
+*   `smartmule --list` (Ver inventario de la biblioteca)
+*   `smartmule --purge "Nombre"` (Borrar archivos)
+*   `smartmule --debug` (Arranca con logs detallados de IA)
+
 ---
 
 ## Mantenimiento y Purga (_Smart Deletion_)
