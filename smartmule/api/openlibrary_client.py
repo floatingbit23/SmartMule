@@ -20,7 +20,7 @@ class OpenLibraryClient:
             "accept": "application/json"
         }
         self.last_request_time = 0.0
-        self.min_delay = 0.35  # Tiempo m?nimo entre peticiones (ligeramente > 1/3s)
+        self.min_delay = 0.35  # Tiempo mínimo entre peticiones (ligeramente > 1/3s)
 
     def _wait_for_rate_limit(self):
         """Bloqueo síncrono para respetar los límites de la API de OpenLibrary."""
@@ -72,7 +72,7 @@ class OpenLibraryClient:
                 
             except requests.exceptions.RequestException as e:
 
-                if attempt < max_retries - 1: # Si no es el ?ltimo intento
+                if attempt < max_retries - 1: # Si no es el último intento
 
                     wait_time = retry_delays[attempt] # Espera exponencial
                     logger.warning(f"[WARN] Error conectando a OpenLibrary ({e}). Reintentando en {wait_time}s... ({attempt + 1}/{max_retries})")

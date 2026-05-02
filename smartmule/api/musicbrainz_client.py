@@ -11,7 +11,7 @@ class MusicBrainzClient:
     """
     Cliente para la API de búsqueda de MusicBrainz.
     MusicBrainz exige un User-Agent identificativo y limita a 1 petición por segundo (req/s)
-    para uso an?nimo (sin auth).
+    para uso anónimo (sin auth).
     """
 
     def __init__(self):
@@ -20,7 +20,7 @@ class MusicBrainzClient:
             "Accept": "application/json"
         }
         self.last_request_time = 0.0
-        self.min_delay = 1.05  # Tiempo m?nimo entre peticiones (ligeramente > 1s)
+        self.min_delay = 1.05  # Tiempo mínimo entre peticiones (ligeramente > 1s)
 
     def _wait_for_rate_limit(self):
         """Bloqueo síncrono para respetar los límites de la API de MusicBrainz."""
@@ -33,7 +33,7 @@ class MusicBrainzClient:
     def _extract_audio_metadata(self, recording: dict) -> dict:
         """Extrae y limpia metadatos de un objeto 'recording' de MusicBrainz."""
         
-        # Inicializamos el diccionario de metadatos con la info b?sica
+        # Inicializamos el diccionario de metadatos con la info básica
         audio_data = {
             "title": recording.get("title"),
             "score": recording.get("score")
@@ -43,7 +43,7 @@ class MusicBrainzClient:
         artist_credit = recording.get("artist-credit", [])
         audio_data["artist"] = artist_credit[0].get("name") if artist_credit else "Desconocido"
 
-        # Lanzamiento: Buscamos en la lista de releases para obtener el ?lbum y la fecha de salida.
+        # Lanzamiento: Buscamos en la lista de releases para obtener el álbum y la fecha de salida.
         releases = recording.get("releases", [])
         if releases:
             first = releases[0]
@@ -59,7 +59,7 @@ class MusicBrainzClient:
 
     def search_audio(self, title: str) -> Optional[dict]:
         """
-        Busca un track/canci?n en MusicBrainz usando el título limpio.
+        Busca un track/canción en MusicBrainz usando el título limpio.
         Implementa reintentos para mayor resiliencia ante fallos de red.
         """
 
@@ -78,7 +78,7 @@ class MusicBrainzClient:
 
         for attempt in range(max_retries):
 
-            # Respetamos el l?mite de tasa (rate limit) de 1 req/s exigido por MusicBrainz
+            # Respetamos el límite de tasa (rate limit) de 1 req/s exigido por MusicBrainz
             self._wait_for_rate_limit()
 
             try:

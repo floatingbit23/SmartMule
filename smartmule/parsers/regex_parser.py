@@ -29,7 +29,7 @@ LANGUAGE_MAP = {
     "JAPANESE": "JP", "JAP": "JP"
 }
 
-# Etiquetas de P2P comunes a eliminar (Categorización, Códics, Calidades, Release Groups (ripeos), ...)
+# Etiquetas de P2P comunes a eliminar (Categorización, Códecs, Calidades, Release Groups (ripeos), ...)
 SCENE_TAGS = [
     # Calidades y Formatos
     r"hdrip", r"web-?dl", r"web-?rip", r"bluray", r"brrip", r"bdrip", r"dvdrip", r"dvd-?scr",

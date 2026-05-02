@@ -1,35 +1,35 @@
 """
-config.py ? Configuración centralizada de SmartMule.
+config.py — Configuración centralizada de SmartMule.
 
-Cargo todas las variables de entorno desde el archivo .env y las expongo como constantes tipadas para que el resto de m?dulos las importen directamente.
-Valido que las rutas cr?ticas existan al arrancar para evitar errores silenciosos.
+Cargo todas las variables de entorno desde el archivo .env y las expongo como constantes tipadas para que el resto de módulos las importen directamente.
+Valido que las rutas críticas existan al arrancar para evitar errores silenciosos.
 """
 
-import os # os es un m?dulo que permite interactuar con el sistema operativo
-import sys # sys es un m?dulo que permite interactuar con el int?rprete de Python
+import os # os es un módulo que permite interactuar con el sistema operativo
+import sys # sys es un módulo que permite interactuar con el intérprete de Python
 import logging
-import logging.handlers # Para la rotaci?n de logs
+import logging.handlers # Para la rotación de logs
 from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Cargo las variables de entorno desde el archivo .env que está en la ra?z del proyecto
+# Cargo las variables de entorno desde el archivo .env que está en la raíz del proyecto
 load_dotenv(override=False)
 
 # === Rutas del sistema de archivos ===
 
 # Base root directory of the project
-BASE_DIR: Path = Path(__file__).parent.parent # Ruta a la ra?z del proyecto
+BASE_DIR: Path = Path(__file__).parent.parent # Ruta a la raíz del proyecto
 
 # Ruta a la carpeta Incoming de eMule, donde llegan las descargas completadas
 # Es la carpeta que voy a monitorizar con el Watcher
 INCOMING_PATH: Path = Path(os.getenv("INCOMING_PATH", r"C:\Users\Javi\eMule\Incoming"))
 
-# Ruta a la carpeta Library, donde organizar? los archivos clasificados
-# Est? en la misma partici?n que Incoming, as? que puedo hacer os.rename() at?mico
+# Ruta a la carpeta Library, donde organizará los archivos clasificados
+# Está en la misma partición que Incoming, así que puedo hacer os.rename() atómico
 LIBRARY_PATH: Path = Path(os.getenv("LIBRARY_PATH", r"C:\Users\Javi\eMule\SmartMule\Library"))
 
-# Ruta ra?z del proyecto (donde vive main.py)
+# Ruta raíz del proyecto (donde vive main.py)
 PROJECT_PATH: Path = Path(os.getenv("PROJECT_PATH", str(BASE_DIR)))
 
 # === Parámetros del hashing ED2K ===
@@ -46,13 +46,13 @@ DB_PATH: Path = LIBRARY_PATH / ".data" / "smartmule.db"
 # === Parámetros del Watcher (debouncing) ===
 
 # Tiempo en segundos que espero sin recibir nuevos eventos de un mismo archivo antes de considerarlo "estable" y procesarlo. 
-# Windows genera m?ltiples eventos (created + modified) para una sola operación de archivo, as? que necesito este margen (3 segundos) para agruparlos en una sola acci?n.
+# Windows genera múltiples eventos (created + modified) para una sola operación de archivo, así que necesito este margen (3 segundos) para agruparlos en una sola acción.
 DEBOUNCE_SECONDS: float = float(os.getenv("DEBOUNCE_SECONDS", "3.0"))
 
-# Modo de organizaci?n de archivos en la biblioteca:
+# Modo de organización de archivos en la biblioteca:
 # 'move': Mueve el archivo (corta el seeding de Torrent, ok para eMule)
 # 'copy': Copia el archivo (consume el doble de espacio)
-# 'hardlink': Crea un enlace duro (?ptimo para seeding de Torrents en el mismo disco)
+# 'hardlink': Crea un enlace duro (óptimo para seeding de Torrents en el mismo disco)
 ORGANIZER_MODE: str = os.getenv("ORGANIZER_MODE", "hardlink").lower()
 
 
@@ -69,10 +69,10 @@ ORGANIZER_MODE: str = os.getenv("ORGANIZER_MODE", "hardlink").lower()
 FILE_LOCK_TIMEOUT: int = int(os.getenv("FILE_LOCK_TIMEOUT", "120"))
 
 # Delay inicial entre reintentos cuando un archivo está bloqueado (en segundos).
-# Despu?s de cada intento fallido, duplico este valor (backoff exponencial).
+# Después de cada intento fallido, duplico este valor (backoff exponencial).
 FILE_LOCK_INITIAL_DELAY: float = 1.0
 
-# Delay máximo entre reintentos. El backoff exponencial nunca superar? este valor, aunque se hayan acumulado muchos intentos. 
+# Delay máximo entre reintentos. El backoff exponencial nunca superará este valor, aunque se hayan acumulado muchos intentos. 
 # De esta forma evito esperas absurdas.
 FILE_LOCK_MAX_DELAY: float = 15.0
 
@@ -81,7 +81,7 @@ FILE_LOCK_MAX_DELAY: float = 15.0
 # Estas son las extensiones de los archivos temporales de eMule y clientes Torrent.
 # Los ignoro completamente porque son archivos incompletos o metadatos internos que no debo procesar. 
 
-# El Watcher descartar? cualquier evento que involucre archivos con estas extensiones:
+# El Watcher descartará cualquier evento que involucre archivos con estas extensiones:
 IGNORED_EXTENSIONS: set = {
     ".part",          # Descarga incompleta de eMule
     ".part.met",      # Metadatos de la descarga en curso
@@ -97,7 +97,7 @@ IGNORED_EXTENSIONS: set = {
 # === Logging ===
 
 # Nivel de log configurable desde .env. Controla la verbosidad de los mensajes:
-# DEBUG = todo, INFO = operaciones normales, WARNING = anomal?as, ERROR = fallos.
+# DEBUG = todo, INFO = operaciones normales, WARNING = anomalías, ERROR = fallos.
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
 
@@ -132,19 +132,19 @@ GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
 class ColoredFormatter(logging.Formatter):
     """
-    Formateador de logs que a?ade colores ANSI seg?n el nivel y el contenido.
+    Formateador de logs que añade colores ANSI según el nivel y el contenido.
     - ERROR: Rojo
     - WARNING: Amarillo
     - Mensajes que empiezan con [OK]: Verde
     """
     
-    # C?digos ANSI para colores
+    # Códigos ANSI para colores
     RESET = "\033[0m"
     RED = "\033[91m"
     YELLOW = "\033[93m"
     GREEN = "\033[92m"
     
-    # Colores para m?dulos
+    # Colores para módulos
     BLUE = "\033[94m"     # main
     CYAN = "\033[96m"     # watcher
     MAGENTA = "\033[95m"  # queue_manager
@@ -161,14 +161,14 @@ class ColoredFormatter(logging.Formatter):
     }
 
     def format(self, record):
-        # Extraemos salto de l?nea manual para que no rompa el prefijo (timestamp, logger)
+        # Extraemos salto de línea manual para que no rompa el prefijo (timestamp, logger)
         has_manual_newline = False
         msg_str = str(record.msg) if record.msg else ""
         if msg_str.startswith("\n"):
             has_manual_newline = True
             record.msg = msg_str[1:] # Lo quitamos temporalmente
 
-        # Guardamos el nombre original para restaurarlo despu?s (por si hay otros handlers)
+        # Guardamos el nombre original para restaurarlo después (por si hay otros handlers)
         original_name = record.name
         
         # Aplicamos el color al nombre del componente
@@ -183,11 +183,11 @@ class ColoredFormatter(logging.Formatter):
         record.name = original_name
         record.msg = msg_str 
         
-        # L?gica de colores por nivel (Prioridad: CRITICAL siempre Violeta)
+        # Lógica de colores por nivel (Prioridad: CRITICAL siempre Violeta)
         if record.levelno == logging.CRITICAL:
             log_message = f"{self.MAGENTA}{log_message}{self.RESET}"
         
-        # L?gica de colores por emojis si no es cr?tico (ya que ya tiene color violeta)
+        # Lógica de colores por emojis si no es crítico (ya que ya tiene color violeta)
         else:
             if getattr(record, 'msg', '').startswith("\n") and getattr(record, 'msg', '')[1:].startswith("[ERR]"):
                 log_message = f"{self.RED}{log_message}{self.RESET}"
@@ -198,11 +198,11 @@ class ColoredFormatter(logging.Formatter):
             elif msg_str.startswith("[OK]"):
                 log_message = f"{self.GREEN}{log_message}{self.RESET}"
             
-        # Si el usuario mand? un \n al principio del log (ej: Procesando), lo metemos antes de toda la l?nea (antes de la hora).
+        # Si el usuario mandó un \n al principio del log (ej: Procesando), lo metemos antes de toda la línea (antes de la hora).
         if has_manual_newline:
             log_message = f"\n{log_message}"
 
-        # Petición: Todos los logs que no sean de tipo INFO tendr?n un \n arriba y otro abajo.
+        # Petición: Todos los logs que no sean de tipo INFO tendrán un \n arriba y otro abajo.
         if record.levelno != logging.INFO:
             log_message = f"\n{log_message}\n"
         
@@ -219,7 +219,7 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
         level: Nivel de log opcional (ej: "DEBUG"). Si no se pasa, usa LOG_LEVEL de .env.
 
     Returns:
-        Logger ra?z configurado con el nivel especificado.
+        Logger raíz configurado con el nivel especificado.
     """
     
     # Prioridad: nivel pasado por argumento > LOG_LEVEL de config/env > INFO (fallback)
@@ -229,7 +229,7 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
     log_format = "%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s"
     date_format = "%H:%M:%S"
 
-    # Configuro el logger ra?z
+    # Configuro el logger raíz
     root_logger = logging.getLogger()
     root_logger.setLevel(target_level)
 
@@ -249,13 +249,13 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
 
     # === Handler para guardar logs en archivo de texto plano ===
 
-    # El log se llamar? 'smartmule.log' y estar? en la ra?z del proyecto.
+    # El log se llamará 'smartmule.log' y estará en la raíz del proyecto.
     # Usamos un 'RotatingFileHandler' para que el archivo no crezca indefinidamente
     # Mantendremos hasta 3 copias de backup (smartmule.log.1, smartmule.log.2, smartmule.log.3)
     
     log_file = BASE_DIR / "smartmule.log"
 
-    file_handler = logging.handlers.RotatingFileHandler( # Rotaci?n de logs
+    file_handler = logging.handlers.RotatingFileHandler( # Rotación de logs
         log_file, 
         maxBytes=5 * 1024 * 1024,  # 5 MB
         backupCount=3, 
@@ -265,7 +265,7 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
     file_formatter = logging.Formatter("%(asctime)s  %(levelname)-8s [%(name)s]  %(message)s", date_format) # Formato del log
     file_handler.setFormatter(file_formatter) # Asigna el formateador al handler
     
-    root_logger.addHandler(file_handler) # A?ade el handler de archivo al logger ra?z
+    root_logger.addHandler(file_handler) # Añade el handler de archivo al logger raíz
 
     return logging.getLogger("SmartMule")
 
@@ -273,15 +273,15 @@ def setup_logging(level: Optional[str] = None) -> logging.Logger:
 def validate_paths() -> bool:
 
     """
-    Verifico que las rutas cr?ticas existan antes de arrancar el servicio.
+    Verifico que las rutas críticas existan antes de arrancar el servicio.
     Si la carpeta Incoming no existe, no tiene sentido continuar porque no hay nada que monitorizar. 
-    Si la carpeta Library no existe, la creo autom?ticamente porque es donde voy a organizar los archivos.
+    Si la carpeta Library no existe, la creo automáticamente porque es donde voy a organizar los archivos.
 
     Returns:
         True si todo está correcto, False si hay un error irrecuperable.
     """
 
-    # Obtengo el logger para esta funci?n
+    # Obtengo el logger para esta función
     logger = logging.getLogger("SmartMule.config")
 
     # Verifico que la carpeta Incoming existe
@@ -298,9 +298,9 @@ def validate_paths() -> bool:
         )
         return False
 
-    # La carpeta Library la creo si no existe, porque es responsabilidad m?a mantenerla. 
+    # La carpeta Library la creo si no existe, porque es responsabilidad mía mantenerla. 
     if not LIBRARY_PATH.exists():
         logger.info(f"[*]  Creando carpeta Library: {LIBRARY_PATH}")
-        LIBRARY_PATH.mkdir(parents=True, exist_ok=True) # parents=True crea tambi?n los directorios intermedios.
+        LIBRARY_PATH.mkdir(parents=True, exist_ok=True) # parents=True crea también los directorios intermedios.
 
     return True

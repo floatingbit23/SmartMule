@@ -1,14 +1,14 @@
 """
-Cola de prioridad con trabajador ?nico (Single Worker) para SmartMule.
+Cola de prioridad con trabajador único (Single Worker) para SmartMule.
 
-Implemento el patr?n Producer-Consumer para evitar que m?ltiples descargas completadas simult?neamente saturen el disco duro.
+Implemento el patrón Producer-Consumer para evitar que múltiples descargas completadas simultáneamente saturen el disco duro.
 
 1. El Watcher (Producer) detecta archivos nuevos y los mete en una cola de prioridad (PriorityQueue).
 2. La cola de prioridad ordena los archivos por orden de importancia*.
-3. Un ?nico hilo trabajador (Consumer) saca los archivos de la cola y los procesa uno por uno.
+3. Un único hilo trabajador (Consumer) saca los archivos de la cola y los procesa uno por uno.
 
-*Uso una PriorityQueue para que los archivos peque?os (PDFs, ebooks...) se procesen antes que las películas de 20 GB.
-Esto da la sensaci?n de que SmartMule es rápido, porque los archivos peque?os se organizan en milisegundos mientras los grandes esperan su turno sin molestar.
+*Uso una PriorityQueue para que los archivos pequeños (PDFs, ebooks...) se procesen antes que las películas de 20 GB.
+Esto da la sensación de que SmartMule es rápido, porque los archivos pequeños se organizan en milisegundos mientras los grandes esperan su turno sin molestar.
 """
 
 import os
@@ -27,41 +27,41 @@ from smartmule.config import DB_PATH, IGNORED_EXTENSIONS
 from smartmule.metadata_engine import MetadataEngine
 from smartmule.organizer import LibraryOrganizer
 
-# Creo un logger espec?fico para este m?dulo.
+# Creo un logger específico para este módulo.
 logger = logging.getLogger("SmartMule.queue_manager")
 
 # === Umbrales de tamaño para asignar prioridades ===
-SIZE_SMALL = 50 * 1024 * 1024       # 50 MB ? archivos "instant?neos"
-SIZE_MEDIUM = 1024 * 1024 * 1024    # 1 GB ? archivos medianos
-SIZE_LARGE = 5 * 1024 * 1024 * 1024  # 5 GB ? archivos grandes
+SIZE_SMALL = 50 * 1024 * 1024       # 50 MB -> archivos "instantáneos"
+SIZE_MEDIUM = 1024 * 1024 * 1024    # 1 GB -> archivos medianos
+SIZE_LARGE = 5 * 1024 * 1024 * 1024  # 5 GB -> archivos grandes
 
 # Conjunto de extensiones que considero ejecutables y que necesitan triaje de seguridad urgente
 # Les doy prioridad alta independientemente de su tamaño
 EXECUTABLE_EXTENSIONS: set = {".exe", ".msi", ".bat", ".cmd", ".com", ".scr"}
 
-@dataclass(order=True) # @dataclass es una herramienta que permite crear clases de forma r?pida y sencilla 
+@dataclass(order=True) # @dataclass es una herramienta que permite crear clases de forma rápida y sencilla 
 class FileTask: 
 
     """
     Represento una tarea de procesamiento de archivo en la cola de prioridad.
 
     Dataclass compuesto por:
-    - Prioridad num?rica
+    - Prioridad numérica
     - Ruta completa al archivo
     - Tamaño del archivo en bytes
     - Timestamp de cuando puse el archivo en la cola
 
-    Uso @dataclass(order=True) para que Python compare las instancias autom?ticamente. 
-    Con compare=False en todos los campos excepto 'priority', me aseguro de que la PriorityQueue ordene SOLO por prioridad num?rica.
+    Uso @dataclass(order=True) para que Python compare las instancias automáticamente. 
+    Con compare=False en todos los campos excepto 'priority', me aseguro de que la PriorityQueue ordene SOLO por prioridad numérica.
     """
 
-    # La prioridad num?rica (del 1 al 5): menor n?mero = se procesa primero
+    # La prioridad numérica (del 1 al 5): menor número = se procesa primero
     priority: int
 
-    # Ruta completa al archivo. No participa en la comparaci?n de orden
+    # Ruta completa al archivo. No participa en la comparación de orden
     file_path: str = field(compare=False)
 
-    # Tamaño del archivo en bytes. Lo guardo para logging y para la l?gica de implementaciones posteriores (ej: buffer de lectura para hashing)
+    # Tamaño del archivo en bytes. Lo guardo para logging y para la lógica de implementaciones posteriores (ej: buffer de lectura para hashing)
     file_size: int = field(compare=False)
 
     # Timestamp de cuando puse el archivo en la cola
@@ -76,7 +76,7 @@ class QueueManager:
 
     La clase garantiza que:
     1. Los archivos se procesen UNO POR UNO (nunca en paralelo).
-    2. Los archivos peque?os tengan prioridad sobre los grandes.
+    2. Los archivos pequeños tengan prioridad sobre los grandes.
     3. Los ejecutables se procesen con urgencia (medida de seguridad).
     4. El Worker Thread se pueda detener limpiamente con stop().
     """
@@ -87,7 +87,7 @@ class QueueManager:
         """
         Inicializo la cola de prioridad, la base de datos SQLite y arranco el Worker Thread.
 
-        process_callback: Funci?n opcional para procesar cada archivo.
+        process_callback: Función opcional para procesar cada archivo.
         Si es None, uso el pipeline real (hasher ED2K + caché SQLite).
         """
 
@@ -102,14 +102,14 @@ class QueueManager:
         self._active_paths: set[str] = set()
 
         # Abro la BBDD SQLite de caché con la ruta preconfigurada en config.py. 
-        # Se crea autom?ticamente si no existe.
+        # Se crea automáticamente si no existe.
         self._db = HashDatabase(DB_PATH) # Instancio la clase HashDatabase
 
         # Guardo el callback de procesamiento.
-        # Si se pasa un callback externo (?til para tests), lo uso. Si no, uso el pipeline real.
+        # Si se pasa un callback externo (útil para tests), lo uso. Si no, uso el pipeline real.
         self._process_callback = process_callback or self._process_file
 
-        # Flag para se?alar al Worker que debe detenerse. Uso un Event en vez de un bool simple porque es thread-safe.
+        # Flag para señalar al Worker que debe detenerse. Uso un Event en vez de un bool simple porque es thread-safe.
         self._stop_event = threading.Event() # Instancio la clase Event
 
         # Creo el Worker Thread como daemon (hilo secundario) para que no impida que el programa principal termine si algo sale mal.
@@ -123,7 +123,7 @@ class QueueManager:
             self.start_worker()
 
     def start_worker(self) -> None:
-        """Arranca el Worker Thread si no está ya en ejecuci?n."""
+        """Arranca el Worker Thread si no está ya en ejecución."""
         if not self._worker_thread.is_alive():
             self._worker_thread.start() 
             logger.info("Worker iniciado. Atendiendo archivos en la cola...")
@@ -133,7 +133,7 @@ class QueueManager:
     def enqueue(self, file_path: Path) -> None:
         """
         Encolo un archivo para su procesamiento. 
-        Calculo su prioridad  bas?ndome en el tamaño y la extensi?n, creo un FileTask y lo meto en la PriorityQueue.
+        Calculo su prioridad basándome en el tamaño y la extensión, creo un FileTask y lo meto en la PriorityQueue.
 
         Args:
             file_path: Ruta completa al archivo que quiero procesar.
@@ -178,7 +178,7 @@ class QueueManager:
             )
             return
 
-        # Calculo la prioridad bas?ndome en las reglas definidas en _calculate_priority().
+        # Calculo la prioridad basándome en las reglas definidas en _calculate_priority().
         priority = self._calculate_priority(file_path, file_size)
 
         # Creo la tarea con toda la información necesaria.
@@ -196,38 +196,38 @@ class QueueManager:
 
         logger.info(
             f"[OK] Encolado [P{priority}]: {file_path.name} ({size_str}) "
-            f"? {self.pending_count} tarea(s) en cola"
+            f"[i] {self.pending_count} tarea(s) en cola"
         )
 
 
-    # Método para calcular la prioridad del archivo (retorna un n?mero entre 1 y 5)
+    # Método para calcular la prioridad del archivo (retorna un número entre 1 y 5)
     def _calculate_priority(self, file_path: Path, file_size: int) -> int:
 
         """
-        Asigno una prioridad num?rica al archivo. Menor n?mero = m?s urgente.
+        Asigno una prioridad numérica al archivo. Menor número = más urgente.
 
-        Mi l?gica de priorizaci?n es la siguiente:
+        Mi lógica de priorización es la siguiente:
 
-        - P1: Archivos peque?os (< 50 MB) ? PDFs, ebooks, im?genes, vídeos cortos, m?sica, subtítulos...
+        - P1: Archivos pequeños (< 50 MB) -> PDFs, ebooks, imágenes, vídeos cortos, música, subtítulos...
             Se hashean en milisegundos, el usuario los ve organizados al instante.
 
-        - P2: Ejecutables de cualquier tamaño ? necesitan auditor?a de seguridad urgente.
+        - P2: Ejecutables de cualquier tamaño -> necesitan auditoría de seguridad urgente.
 
-        - P3: Archivos medianos (50 MB a 1 GB) ? episodios de series, vídeos largos...
+        - P3: Archivos medianos (50 MB a 1 GB) -> episodios de series, vídeos largos...
 
-        - P4: Archivos grandes (1 GB a 5 GB) ? películas 720p/1080p...
+        - P4: Archivos grandes (1 GB a 5 GB) -> películas 720p/1080p...
 
-        - P5: Archivos muy grandes (> 5 GB) ? películas 4K, ISOs...
+        - P5: Archivos muy grandes (> 5 GB) -> películas 4K, ISOs...
 
         Args:
-            file_path: Ruta al archivo (necesito la extensi?n).
+            file_path: Ruta al archivo (necesito la extensión).
             file_size: Tamaño en bytes del archivo.
 
         Returns:
-            Prioridad num?rica (1-5).
+            Prioridad numérica (1-5).
         """
 
-        extension = file_path.suffix.lower() # Obtengo la extensi?n del archivo y la convierto a min?sculas.
+        extension = file_path.suffix.lower() # Obtengo la extensión del archivo y la convierto a minúsculas.
 
         # Los ejecutables siempre van con prioridad 2, sin importar su tamaño.
         if extension in EXECUTABLE_EXTENSIONS:
@@ -235,13 +235,13 @@ class QueueManager:
 
         # Para el resto, la prioridad depende del tamaño.
         if file_size < SIZE_SMALL:
-            return 1   # Prioridad m?xima
+            return 1   # Prioridad máxima
         elif file_size < SIZE_MEDIUM:
             return 3   # Prioridad media
         elif file_size < SIZE_LARGE:
             return 4   # Prioridad baja
         else:
-            return 5   # Prioridad m?nima
+            return 5   # Prioridad mínima
 
 
     # Bucle principal del Worker Thread
@@ -250,32 +250,32 @@ class QueueManager:
         """
         Bucle principal del Worker Thread. 
         Saco tareas de la PriorityQueue una por una y las proceso secuencialmente (una a la vez). 
-        Uso get() con timeout (1s) para poder comprobar peri?dicamente si debo detenerme.
+        Uso get() con timeout (1s) para poder comprobar periódicamente si debo detenerme.
 
-        Este hilo es el ?NICO que procesar? archivos. 
-        Nunca hay dos archivos proces?ndose en paralelo, lo cual es m?s respetuoso con el HDD/SSD.
+        Este hilo es el ÚNICO que procesará archivos. 
+        Nunca hay dos archivos procesándose en paralelo, lo cual es más respetuoso con el HDD/SSD.
         """
 
         logger.debug("[i]  Worker loop arrancado")
 
-        # Mientras no se reciba la se?al de parada, el Worker intentar? sacar tareas de la cola.
+        # Mientras no se reciba la señal de parada, el Worker intentará sacar tareas de la cola.
         while not self._stop_event.is_set():
 
             try:
                 # Intento sacar una tarea de la cola con un timeout de 1 segundo.
                 task = self._queue.get(timeout=1.0)
-                # Si la cola está vac?a, get() se bloquea durante 1s y luego vuelvo a comprobar stop_event. 
-                # As? puedo detenerme limpiamente.
+                # Si la cola está vacía, get() se bloquea durante 1s y luego vuelvo a comprobar stop_event. 
+                # Así puedo detenerme limpiamente.
 
             except Exception:
-                # Si la cola está vac?a y se agot? el timeout, simplemente vuelvo al principio del bucle.
+                # Si la cola está vacía y se agotó el timeout, simplemente vuelvo al principio del bucle.
                 continue
 
-            # Si recibo None (el centinela) como tarea o un objeto con el atributo is_sentinel=True, es la se?al de parada.
+            # Si recibo None (el centinela) como tarea o un objeto con el atributo is_sentinel=True, es la señal de parada.
             # Esto me permite hacer un shutdown limpio.
 
             if task is None or getattr(task, 'is_sentinel', False):
-                logger.debug("[i]  Worker recibi? se?al de parada (centinela)")
+                logger.debug("[i]  Worker recibió señal de parada (centinela)")
                 self._queue.task_done() # Marco la tarea como completada
                 break # Salgo del bucle
 
@@ -301,11 +301,11 @@ class QueueManager:
 
                     # NOTA: No eliminamos la ruta de 'active_paths' inmediatamente. 
                     # Esperamos 5 segundos para ignorar los "ecos" que genera Windows al crear Hardlinks
-                    # o cambiar atributos justo despu?s de mover/organizar el archivo.
+                    # o cambiar atributos justo después de mover/organizar el archivo.
                     def _delayed_remove(p):
                         with self._lock:
                             self._active_paths.discard(p)
-                            logger.debug(f"? Ruta liberada del registro de activos: {Path(p).name}")
+                            logger.debug(f"✓ Ruta liberada del registro de activos: {Path(p).name}")
 
                     import threading
                     threading.Timer(5.0, _delayed_remove, [abs_path]).start()
@@ -326,11 +326,11 @@ class QueueManager:
         # Busco en la caché por huella
         existing = self._db.get_by_fingerprint(fingerprint, file_size)
 
-        # Si no existe, salgo de la comprobaci?n
+        # Si no existe, salgo de la comprobación
         if not existing:
             return False, False, None
 
-        # Si existe, compruebo que el archivo no haya cambiado (comparando la fecha de modificaci?n del archivo con la que está guardada en la caché)
+        # Si existe, compruebo que el archivo no haya cambiado (comparando la fecha de modificación del archivo con la que está guardada en la caché)
         # Si la fecha ha cambiado, necesito recalcular el hash.
         # Si la fecha no ha cambiado, el archivo está en su sitio original y no necesito hacer nada.
         
@@ -347,17 +347,17 @@ class QueueManager:
             # Convierto la ruta a Path
             final_path = Path(final_path_str) if final_path_str else None
 
-            # Si la fecha de modificaci?n no ha cambiado, el archivo está en su sitio original y no necesito hacer nada.
+            # Si la fecha de modificación no ha cambiado, el archivo está en su sitio original y no necesito hacer nada.
             if actual_mtime != cached_mtime:
 
-                logger.info(f"[WARN]  Detectado cambio en la fecha de modificaci?n de {file_name}. Verificando integridad del hash...")
+                logger.info(f"[WARN]  Detectado cambio en la fecha de modificación de {file_name}. Verificando integridad del hash...")
                 return False, True, existing
             
-            # Si la fecha de modificaci?n no ha cambiado, pero no tengo la ruta final...
+            # Si la fecha de modificación no ha cambiado, pero no tengo la ruta final...
             elif final_path and not final_path.exists():
 
                 logger.warning(f"[WARN]  El registro indica que ya estaba organizado, pero NO ha sido encontrado en: {final_path_str}")
-                logger.info(f"[INFO]  Forzando re-organizaci?n de {file_name}...")
+                logger.info(f"[INFO]  Forzando re-organización de {file_name}...")
                 return False, False, existing
             
             # Si el archivo está en su sitio original y no ha cambiado...
@@ -373,7 +373,7 @@ class QueueManager:
                 logger.info(f"[*]  Link: {ed2k_link}")
                 logger.info(f"[i]  Archivo en su ruta final: {existing.get('final_path')}")
                 
-                # Salgo de la comprobaci?n
+                # Salgo de la comprobación
                 return True, False, existing
         
         # Si no está organizado (is_organized == 0) o faltan metadatos
@@ -406,13 +406,13 @@ class QueueManager:
 
         logger.info(
             f"[i]  Procesando [P{task.priority}]: {file_name} ({size_str}) "
-            f"? esper? {wait_time:.2f}s en cola"
+            f"-> esperó {wait_time:.2f}s en cola"
         )
 
 
-        # === FASE 1: Comprobaci?n de Caché por Fingerprint ===
+        # === FASE 1: Comprobación de Caché por Fingerprint ===
         
-        # Calculo la Fast-Fingerprint (primeros 256KB y ?ltimos 256KB).
+        # Calculo la Fast-Fingerprint (primeros 256KB y últimos 256KB).
         fingerprint = calculate_fingerprint(file_path, task.file_size)
 
         # Si no se pudo calcular la huella, registramos el error y saltamos la tarea.
@@ -420,7 +420,7 @@ class QueueManager:
             logger.error(f"[ERR] No se pudo generar la huella digital de {file_name}. Abortando...")
             return
 
-        # Eval?o si la huella ya se ha calculado antes y si el archivo ha cambiado.
+        # Evalúo si la huella ya se ha calculado antes y si el archivo ha cambiado.
         should_skip, force_rehash, existing = self._evaluate_cache_state(file_path, fingerprint, task.file_size)
 
         # Si se debe saltar (porque la huella coincide con un archivo ya organizado y está en su sitio), registramos el log y salimos.
@@ -438,7 +438,7 @@ class QueueManager:
         # Calculo el hash ED2K completo.
         ed2k_hash = calculate_ed2k(file_path)
 
-        # L?gica de tiempo transcurrido
+        # Lógica de tiempo transcurrido
         elapsed = time.time() - hash_start
         mins, secs = divmod(int(elapsed), 60)
         elapsed_str = f"{mins}min {secs}s" if mins > 0 else f"{secs}s"
@@ -449,12 +449,12 @@ class QueueManager:
         ed2k_link = format_ed2k_link(file_path, task.file_size, ed2k_hash)
         logger.info(f"[*]  Link: {ed2k_link}")
 
-        # --- OPTIMIZACI?N POR MTIME (Ahorro de APIs) ---
+        # --- OPTIMIZACIÓN POR MTIME (Ahorro de APIs) ---
 
-        # Si se detect? cambio de mtime (timestamp de modificaci?n del archivo), pero su hash ED2K es el mismo y existe un registro previo:
+        # Si se detectó cambio de mtime (timestamp de modificación del archivo), pero su hash ED2K es el mismo y existe un registro previo:
         if force_rehash and existing and ed2k_hash == existing['ed2k_hash']:
 
-            logger.info("[OK]  Integridad confirmada: El contenido no ha variado a pesar de la modificaci?n del archivo.")
+            logger.info("[OK]  Integridad confirmada: El contenido no ha variado a pesar de la modificación del archivo.")
             logger.info("[INFO]  Reutilizando metadatos existentes...")
             
             # Actualizamos la BBDD solo con el nuevo mtime y timestamp de procesado del archivo
@@ -471,12 +471,12 @@ class QueueManager:
 
         # === FASE 4: IA + APIs ===
 
-        logger.info("[*]  Iniciando orquestaci?n de metadatos (Regex -> IA -> API -> Antimalware)...")
+        logger.info("[*]  Iniciando orquestación de metadatos (Regex -> IA -> API -> Antimalware)...")
 
         engine = MetadataEngine(db=self._db) # Instancio el motor de metadatos con la BBDD
         metadata_dict = engine.identify_file(file_name, str(file_path), ed2k_hash=ed2k_hash)  # Pipeline completo de metadatos
         
-        # === FASE 5: Organizaci?n en Disco ===
+        # === FASE 5: Organización en Disco ===
         
         organizer = LibraryOrganizer() # Instancio el organizador
         final_path = organizer.organize(str(file_path), metadata_dict) # Organizo el archivo
@@ -488,20 +488,20 @@ class QueueManager:
         if final_path == "<DELETED_MALICIOUS>":
             logger.info("[OK]  Archivo purgado de la cola y del sistema.")
         else:
-            logger.info(f"[OK]  Procesamiento y organizaci?n superados para: {file_name}")
+            logger.info(f"[OK]  Procesamiento y organización superados para: {file_name}")
 
     # Método para detener el Worker Thread
     def stop(self) -> None:
 
         """
         Detengo el worker limpiamente.
-        Env?o un centinela (None) a la cola, espero a que el hilo se cierre y cierro la BD SQLite.
+        Envío un centinela (None) a la cola, espero a que el hilo se cierre y cierro la BD SQLite.
         """
 
         logger.info("Deteniendo worker...")
         self._stop_event.set()
 
-        # El centinela har? que el Worker Thread salga del Worker Loop en el pr?ximo get().
+        # El centinela hará que el Worker Thread salga del Worker Loop en el próximo get().
         # Usamos prioridad 0 para que salte al principio de la cola.
         sentinel = FileTask(priority=0, file_path="STOP", file_size=0)
         setattr(sentinel, 'is_sentinel', True)
@@ -510,19 +510,19 @@ class QueueManager:
         # Espero a que el hilo termine, pero con un timeout de 10 segundos por si algo se queda colgado.
         self._worker_thread.join(timeout=10)
 
-        if self._worker_thread.is_alive(): # Si el hilo sigue vivo despu?s del timeout
+        if self._worker_thread.is_alive(): # Si el hilo sigue vivo después del timeout
             logger.warning("[WARN]  El worker no se detuvo en 10 segundos. Forzando cierre...")
 
-        # Cierro la conexi?n a la base de datos SQLite limpiamente.
+        # Cierro la conexión a la base de datos SQLite limpiamente.
         self._db.close()
 
 
-    # Método para obtener el n?mero de tareas pendientes en la cola
+    # Método para obtener el número de tareas pendientes en la cola
     @property # @property permite acceder a un método como si fuera un atributo.
     def pending_count(self) -> int:
         """
-        Devuelvo el n?mero de tareas pendientes en la cola.
-        ?til para monitorización y logging.
+        Devuelvo el número de tareas pendientes en la cola.
+        Útil para monitorización y logging.
         """
         return self._queue.qsize()
 
@@ -532,8 +532,8 @@ class QueueManager:
     def _format_size(size_bytes: int) -> str:
 
         """
-        Convierto bytes a una representaci?n legible (KB, MB, GB).
-        As? los logs son comprensibles para los usuarios.
+        Convierto bytes a una representación legible (KB, MB, GB).
+        Así los logs son comprensibles para los usuarios.
 
         Args:
             size_bytes: Tamaño en bytes.

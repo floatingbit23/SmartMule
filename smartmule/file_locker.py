@@ -1,11 +1,11 @@
 """
-file_locker.py ? Gesti?n de bloqueos de archivos en Windows.
+file_locker.py — Gestión de bloqueos de archivos en Windows.
 
 Cuando eMule termina una descarga, mueve el archivo a la carpeta Incoming,
 pero lo mantiene abierto durante unos segundos mientras actualiza su base de datos interna ('known.met'). 
-Si intentara leer o mover el archivo en ese momento, Windows me devolver?a un PermissionError (Error 32: Sharing Violation).
+Si intentara leer o mover el archivo en ese momento, Windows me devolvería un PermissionError (Error 32: Sharing Violation).
 
-Por ello implementar? un mecanismo de espera inteligente con backoff exponencial.
+Por ello implementaré un mecanismo de espera inteligente con backoff exponencial.
 De esta forma no saturo el sistema con reintentos constantes y doy tiempo a eMule para que termine su trabajo.
 """
 
@@ -20,7 +20,7 @@ from smartmule.config import (
     FILE_LOCK_MAX_DELAY,
 )
 
-# Logger espec?fico para el m?dulo del FileLocker.
+# Logger específico para el módulo del FileLocker.
 logger = logging.getLogger("SmartMule.file_locker")
 
 
@@ -28,16 +28,16 @@ logger = logging.getLogger("SmartMule.file_locker")
 def is_file_locked(path: Path) -> bool:
 
     """
-    Compruebo si un ?tem (archivo o carpeta) está bloqueado por otro proceso.
+    Compruebo si un ítem (archivo o carpeta) está bloqueado por otro proceso.
     
     - Si es un archivo: Intento abrirlo en modo lectura binaria (rb).
     - Si es una carpeta: Verifico recursivamente si alguno de los archivos que contiene está bloqueado.
 
     Args:
-        path: Ruta completa al ?tem que quiero verificar.
+        path: Ruta completa al ítem que quiero verificar.
 
     Returns:
-        True -> si el ?tem (o algo dentro de ?l) está bloqueado.
+        True -> si el ítem (o algo dentro de él) está bloqueado.
         False -> si todo está libre.
     """
 
@@ -58,12 +58,12 @@ def is_file_locked(path: Path) -> bool:
 
 def _is_single_file_locked(file_path: Path) -> bool:
 
-    """Implementaci?n interna para un solo archivo físico."""
+    """Implementación interna para un solo archivo físico."""
     
     try:
         # Intentamos abrir el archivo en modo lectura binaria y cerrarlo inmediatamente.
 
-        # En Windows, si otro proceso (como eMule) tiene el archivo bloqueado, esta operación lanzar? un PermissionError (Sharing Violation).
+        # En Windows, si otro proceso (como eMule) tiene el archivo bloqueado, esta operación lanzará un PermissionError (Sharing Violation).
         open(file_path, "rb").close()
         return False
 
@@ -72,7 +72,7 @@ def _is_single_file_locked(file_path: Path) -> bool:
         return True
 
     except OSError:
-        # Errores de red o de sistema se tratan como bloqueado por precauci?n.
+        # Errores de red o de sistema se tratan como bloqueado por precaución.
         return True
 
 
@@ -85,14 +85,14 @@ def wait_for_unlock(
 ) -> bool:
 
     """
-    Espero a que un ?tem (archivo o carpeta) sea accesible, usando reintentos con backoff exponencial.
+    Espero a que un ítem (archivo o carpeta) sea accesible, usando reintentos con backoff exponencial.
 
     Proceso:
     1. Intento abrir el archivo en modo lectura binaria (rb).
     2. Si falla con PermissionError, espero 'initial_delay' segundos.
     3. En cada reintento, duplico el tiempo de espera (backoff exponencial), pero nunca supero 'max_delay' segundos entre intentos.
     4. Si el tiempo total acumulado supera 'timeout', me rindo y retorno False.
-    5. Si el archivo desaparece durante la espera (fue eliminado por el usuario o por eMule), tambi?n retorno False.
+    5. Si el archivo desaparece durante la espera (fue eliminado por el usuario o por eMule), también retorno False.
 
     El backoff exponencial (1s, 2s, 4s, 8s, 16s...) es crucial para no saturar el disco con operaciones open() constantes.
 
@@ -100,11 +100,11 @@ def wait_for_unlock(
         path:     Ruta al archivo o carpeta que espero que se desbloquee.
         timeout:       Tiempo máximo total de espera en segundos (default: 120).
         initial_delay: Espera inicial entre reintentos en segundos (default: 1.0).
-        max_delay:     Espera m?xima entre reintentos en segundos (default: 15.0).
+        max_delay:     Espera máxima entre reintentos en segundos (default: 15.0).
 
     Returns:
         True -> si el archivo se desbloqueó dentro del timeout.
-        False -> si se agot? el tiempo (timeout) o el archivo ya no existe.
+        False -> si se agotó el tiempo (timeout) o el archivo ya no existe.
 
     Si es una carpeta, se considera desbloqueada cuando TODOS sus archivos internos son accesibles.
     """
@@ -114,22 +114,22 @@ def wait_for_unlock(
     current_delay = initial_delay
     attempt = 0
 
-    # Determinamos el tipo de ?tem (Item Type) para los logs
+    # Determinamos el tipo de ítem (Item Type) para los logs
     item_type = "Carpeta" if path.is_dir() else "Archivo"
 
     while True:
         attempt += 1
 
-        # Primero verifico que el ?tem siga existiendo
+        # Primero verifico que el ítem siga existiendo
         if not path.exists():
             logger.warning(
-                f"[WARN]  {item_type} '{path.name}' desapareci? durante la espera (intento #{attempt})."
+                f"[WARN]  {item_type} '{path.name}' desapareció durante la espera (intento #{attempt})."
             )
             return False
 
-        # Verificamos si está bloqueado usando la l?gica inteligente que distingue entre archivo/carpeta
+        # Verificamos si está bloqueado usando la lógica inteligente que distingue entre archivo/carpeta
         if not is_file_locked(path):
-            # ??xito!
+            # Éxito!
             
             if attempt > 1: # Si ha habido reintentos, informo del tiempo total transcurrido
                 elapsed = time.monotonic() - start_time
@@ -153,7 +153,7 @@ def wait_for_unlock(
             return False
 
         # Informo del reintento.
-        # Uso DEBUG para los primeros intentos y WARNING si ya llevo m?s de 5, porque algo raro puede estar pasando
+        # Uso DEBUG para los primeros intentos y WARNING si ya llevo más de 5, porque algo raro puede estar pasando
         log_level = logging.WARNING if attempt > 5 else logging.DEBUG
 
         logger.log(
