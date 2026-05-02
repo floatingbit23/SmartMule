@@ -1,14 +1,19 @@
 """
-Caché SQLite para los hashes ED2K procesados por SmartMule.
+Motor de Persistencia y Motor de Metadatos de SmartMule.
 
-Uso la BBDD Relacional ligera SQLite (v3.46.0) para persistir los hashes de los archivos ya procesados. 
-Esto me permite:
-1. Evitar recalcular el hash de un archivo que ya fue procesado anteriormente.
-2. Mantener un historial de todos los archivos que SmartMule ha gestionado.
-3. Consultar en implementaciones posteriores si un archivo concreto ya fue clasificado.
+Gestiono el almacenamiento centralizado en SQLite (v3.46+) para garantizar la integridad y el 
+enriquecimiento de la biblioteca multimedia.
 
-La base de datos (BBDD) es un archivo único ('smartmule.db') en la carpeta Library (reside en el disco duro del usuario, memoria persistente).
-No necesita un servidor, no tiene dependencias externas y se crea automáticamente si no existe. 
+Este módulo es el "cerebro" que permite:
+1. Optimización P2P: Evitar el recalculo de hashes ED2K/SHA256 y prevenir duplicidad de archivos.
+2. Enriquecimiento Semántico: Almacenar metadatos avanzados (Autores, Títulos, Resoluciones) 
+   obtenidos mediante el análisis híbrido (Regex + LLM + APIs externas).
+3. Triage de Seguridad: Persistir veredictos de seguridad y enlaces de informes de VirusTotal.
+4. Motor de Búsqueda: Servir como base para el sistema de búsqueda global avanzada (FTS5).
+5. Trazabilidad: Mantener el estado de organización (is_organized) y rutas físicas finales.
+
+La base de datos es un archivo autónomo ('smartmule.db') ubicado en la carpeta Library. 
+No requiere configuración, es resiliente a fallos y escala eficientemente para miles de registros.
 """
 
 import re # Para el soporte de expresiones regulares en la búsqueda
@@ -26,7 +31,7 @@ class HashDatabase:
     """
     Gestiono la caché SQLite de hashes ED2K procesados.
 
-    La tabla 'hashes' almacena:
+    La tabla 'files' almacena:
     - La ruta y el nombre del archivo procesado.
     - Su tamaño en bytes.
     - Su hash ED2K en formato hexadecimal.
@@ -48,18 +53,18 @@ class HashDatabase:
             ed2k_link    TEXT NOT NULL, -- Enlace ed2k:// generado
             processed_at TEXT NOT NULL, -- Fecha y hora en que fue procesado
             file_mtime   INTEGER DEFAULT 0, -- Fecha de modificación del sistema de archivos
-            official_title TEXT DEFAULT '',
-            release_date TEXT DEFAULT '',
-            author TEXT DEFAULT '',
-            score REAL DEFAULT 0,
-            media_type TEXT DEFAULT 'unknown',
-            resolution TEXT DEFAULT '',
-            languages TEXT DEFAULT '',
-            subtitles TEXT DEFAULT '',
-            security_verdict TEXT DEFAULT '',
-            vt_url TEXT DEFAULT '',
-            final_path TEXT DEFAULT '',
-            is_organized INTEGER DEFAULT 0
+            official_title TEXT DEFAULT '', -- Título oficial 
+            release_date TEXT DEFAULT '', -- Fecha de lanzamiento
+            author TEXT DEFAULT '', -- Autor 
+            score REAL DEFAULT 0, -- Puntuación 
+            media_type TEXT DEFAULT 'unknown', -- Tipo de archivo (audio, video, documento, imagen, etc.)
+            resolution TEXT DEFAULT '', -- Resolución
+            languages TEXT DEFAULT '', -- Idiomas detectados
+            subtitles TEXT DEFAULT '', -- Subtítulos detectados
+            security_verdict TEXT DEFAULT '', -- Veredicto de seguridad
+            vt_url TEXT DEFAULT '', -- URL del informe de VirusTotal
+            final_path TEXT DEFAULT '', -- Ruta final del archivo
+            is_organized INTEGER DEFAULT 0 -- Por defecto: no organizado=0, organizado=1 
         );
     """
 
@@ -139,7 +144,7 @@ class HashDatabase:
         # 4º. Confirmo los cambios en la BBDD.
         self._conn.commit()
 
-        logger.debug(f"🔹  Base de datos SQLite abierta en: {db_path}")
+        logger.debug(f"[*]  Base de datos SQLite abierta en: {db_path}")
 
 
     def _regexp_worker(self, expr: str, item: str) -> bool:
@@ -253,7 +258,7 @@ class HashDatabase:
 
         self._conn.commit()
 
-        logger.debug(f"🔹  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
+        logger.debug(f"[*]  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
 
 
     # Función de búsqueda por nombre (para el comando purge)
@@ -297,7 +302,7 @@ class HashDatabase:
             cursor = self._conn.execute(sql, (regex_pattern, regex_pattern))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"❌  Error en búsqueda Regex/Wildcard '{query}': {e}")
+            logger.error(f"[ERR]  Error en búsqueda Regex/Wildcard '{query}': {e}")
             return []
 
 
@@ -308,7 +313,7 @@ class HashDatabase:
         """
         self._conn.execute("DELETE FROM files WHERE id = ?", (record_id,))
         self._conn.commit()
-        logger.debug(f"🔹  Registro {record_id} eliminado de la base de datos.")
+        logger.debug(f"[*]  Registro {record_id} eliminado de la base de datos.")
 
 
     # Función de actualización de metadatos
@@ -318,50 +323,43 @@ class HashDatabase:
         Actualiza el registro en la caché con los metadatos enriquecidos y la información del Organizador.
         """
 
-        # Extraigo los valores (values) del diccionario que devuelve el MetadataEngine
         api_data = metadata.get("api_data") or {}
         
-        # Metadatos técnicos extraídos por el Parser (Regex o IA)
+        # Metadatos técnicos extraídos por el Parser o Inspección FFmpeg
         resolution = metadata.get("resolution", "")
 
-        # Extraigo los metadatos de las APIs:
+        # === EXTRACCIÓN CON RESPALDO (API > PARSER) ===
+        
+        # Título oficial (Si no hay API, usamos el nombre limpio del regex parser)
+        official_title = api_data.get("official_title") or metadata.get("title", "")
 
-        # Título oficial
-        official_title = api_data.get("official_title", "")
+        # Fecha de lanzamiento (Si no hay API, usamos el año del regex parser)
+        release_date = api_data.get("date") or str(metadata.get("year", ""))
 
-        # Fecha de lanzamiento/estreno
-        release_date = api_data.get("date", "")
+        # Autor (Si no hay API, usamos el autor extraído por el regex parser)
+        author = api_data.get("author") or metadata.get("author", "")
 
-        # Autor
-        author = api_data.get("author", "")
-
-        # Puntuación dada por los usuarios
+        # Puntuación
         score = api_data.get("score", 0.0)
 
-        # Tipo de archivo (película, serie, etc.)
+        # Tipo de archivo
         media_type = metadata.get("media_type", "unknown")
 
-        # Idiomas (Audio)
+        # Idiomas y Subtítulos
         languages = metadata.get("languages", "")
-
-        # Subtítulos (VOSE, etc.)
         subtitles = metadata.get("subtitles", "")
 
-        # Veredicto de seguridad (Safe, Suspicious o Malicious)
+        # Veredicto de seguridad (Limpiamos colores ANSI)
         raw_verdict = api_data.get("veredicto", "")
-
-        # Limpiamos códigos de colores ANSI (utilizando la secuencia hex \x1b para ESC)
-        # Esto asegura que la base de datos guarde solo texto plano sin caracteres de control de consola.
         import re
         security_verdict = re.sub(r'\x1b\[[0-9;]*m', '', raw_verdict)
         
-        # URL del informe de VirusTotal
+        # URL de VirusTotal
         vt_url = api_data.get("url", "")
         
-        # 1 si está organizado (tiene ruta final), 0 si no (no se ha movido o no se ha encontrado)
+        # Estado del organizador
         is_organized = 1 if final_path else 0
 
-        # Actualizo el registro en la caché con los metadatos enriquecidos y la información del Organizador
         self._conn.execute(
             """
             UPDATE files
@@ -373,12 +371,8 @@ class HashDatabase:
              resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, fingerprint, file_size)
         )
 
-        # Uso el fingerprint (la huella SHA256) y el file_size en el WHERE. 
-        # Esto garantiza que, aunque tenga dos archivos que se llamen igual, solo actualizaré el registro exacto cuya huella digital coincida.
-
-        self._conn.commit() # Confirmo los cambios en la BBDD
-
-        logger.debug(f"🔹  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
+        self._conn.commit()
+        logger.debug(f"[*]  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
 
 
     # Función para obtener todos los registros (para el flag --list)
@@ -419,7 +413,7 @@ class HashDatabase:
                 stats["categories"][row[0]] = row[1]
             
         except Exception as e:
-            logger.error(f"❌  Error al obtener estadísticas de la BBDD: {e}")
+            logger.error(f"[ERR]  Error al obtener estadísticas de la BBDD: {e}")
         
         return stats
 
@@ -439,7 +433,7 @@ class HashDatabase:
             try:
                 return json.loads(row['metadata'])
             except Exception as e:
-                logger.error(f"❌  Error parseando JSON de caché para hash {ed2k_hash}: {e}")
+                logger.error(f"[ERR]  Error parseando JSON de caché para hash {ed2k_hash}: {e}")
                 return None
         return None
 
@@ -459,9 +453,9 @@ class HashDatabase:
             metadata_json = json.dumps(metadata_dict)
             self._conn.execute(sql, (ed2k_hash, metadata_json, now_str))
             self._conn.commit()
-            logger.debug(f"💾 Metadatos cacheados para hash {ed2k_hash}")
+            logger.debug(f"[SAVE] Metadatos cacheados para hash {ed2k_hash}")
         except Exception as e:
-            logger.error(f"❌  Error guardando en metadata_cache para {ed2k_hash}: {e}")
+            logger.error(f"[ERR]  Error guardando en metadata_cache para {ed2k_hash}: {e}")
 
 
     # Función de cierre de la BBDD SQLite
@@ -474,4 +468,4 @@ class HashDatabase:
 
         self._conn.close() # Cierro la conexión
         
-        logger.debug("🔹  Conexión a la BBDD SQLite cerrada.")
+        logger.debug("[*]  Conexión a la BBDD SQLite cerrada.")

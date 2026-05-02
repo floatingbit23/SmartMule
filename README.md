@@ -36,7 +36,7 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
     -   **Inspección de Contenedores**: El `ArchiveInspector` analiza archivos `.zip`, `.rar` y `.7z` buscando inconsistencias (ej: un `.exe` disfrazado de película) y mostrando el contenido sospechoso en los logs.
     -   **Puntuaciones Críticas**: Si un archivo tiene más de 5 detecciones en VT (priorizando motores TOP como Microsoft o Kaspersky), lo mueve a **Review** para evitar riesgos.
 
-*   **Desempate Inteligente (Tie-Breaking)**: Usa el año de estreno para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
+*   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas(ej: Solaris 1972 vs Solaris 2002).
 
 *   **Triaje Automático**: 
     -   `MALICIOUS`: Borrado automático destructivo.

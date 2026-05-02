@@ -66,7 +66,7 @@ class VirusTotalClient:
 
         except OSError as e:
             # Capturamos errores de sistema (archivo no encontrado, permisos, etc.)
-            logger.error(f"❌ Error leyendo archivo para calcular SHA-256: {e}")
+            logger.error(f"[ERR] Error leyendo archivo para calcular SHA-256: {e}")
             # Retornamos None para señalizar que el cálculo no fue posible
             return None
 
@@ -79,7 +79,7 @@ class VirusTotalClient:
         """
 
         if not VIRUSTOTAL_API_KEY:
-            logger.error("❌ VIRUSTOTAL_API_KEY no encontrada. No se puede realizar el triaje de seguridad.")
+            logger.error("[ERR] VIRUSTOTAL_API_KEY no encontrada. No se puede realizar el triaje de seguridad.")
             return None
             
         file_hash = self._calculate_sha256(filepath) # Calcula el hash SHA-256 del archivo
@@ -87,8 +87,8 @@ class VirusTotalClient:
         if not file_hash:
             return None
             
-        logger.info(f"⏳  [VT] Hash SHA-256 calculado: {file_hash}")
-        logger.info("ℹ️  Consultando base mundial...")
+        logger.info(f"[WAIT] Hash SHA-256 calculado: {file_hash}")
+        logger.info("[INFO] Consultando base mundial...")
 
         self._wait_for_rate_limit()
 
@@ -100,7 +100,7 @@ class VirusTotalClient:
             
             # Si VT no lo tiene en su BD (archivo desconocido nunca subido) devuelve 404
             if response.status_code == 404:
-                logger.warning("⚠️  [VT] Archivo desconocido en VirusTotal. Nadie lo ha analizado aún!")
+                logger.warning("[WARN] [VT] Archivo desconocido en VirusTotal. Nadie lo ha analizado aún!")
                 return {
                     "stats": {"malicious": 0, "suspicious": -1, "undetected": 100},
                     "results": {}, # No hay resultados por motor si no existe el archivo
@@ -126,5 +126,5 @@ class VirusTotalClient:
             return None # Devuelve None si la respuesta no contiene los datos esperados
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Error conectando a VirusTotal: {e}")
+            logger.error(f"[ERR] Error conectando a VirusTotal: {e}")
             return None

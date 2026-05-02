@@ -26,11 +26,11 @@ def run_test():
     engine = MetadataEngine()
 
     print("\n" + "="*50)
-    print("      🧪 TEST DE PIPELINE HÍBRIDO (REGEX + IA)      ")
+    print("      [TEST] PIPELINE HIBRIDO (REGEX + IA)      ")
     print("="*50 + "\n")
 
     for filename in test_files:
-        print(f"🔹 PROCESANDO: {filename}")
+        print(f"[*] PROCESANDO: {filename}")
         
         filepath = None
         # Si es un ejecutable para testear el triaje y VirusTotal
@@ -52,7 +52,7 @@ def run_test():
         
         # El engine evaluará si Regex (Capa 1) es suficiente o si escala a IA (Capa 2)
         # Finalmente consultará la API oficial (Capa 3 y VT)
-        result = engine.identify_file(filename, filepath)
+        engine.identify_file(filename, filepath)
         
         print("-" * 50 + "\n")
         
@@ -60,7 +60,7 @@ def run_test():
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
-    print("✅ TEST FINALIZADO")
+    print("PIPELINE TEST FINALIZADO")
 
 if __name__ == "__main__":
     run_test()

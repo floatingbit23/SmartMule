@@ -28,7 +28,7 @@ class TMDBClient:
         """Realiza la petición HTTP GET base gestionando timeouts y errores de red."""
         
         if not TMDB_BEARER_TOKEN or TMDB_BEARER_TOKEN == "tu_bearer_token_aqui":
-            logger.error("❌ Token de TMDB no configurado en .env")
+            logger.error("[ERR] Token de TMDB no configurado en .env")
             return None
 
         # Construimos la URL
@@ -49,7 +49,7 @@ class TMDBClient:
                 # Gestión del Rate Limiting de TMDB v3
                 if response.status_code == 429: # HTTP 429: Too Many Requests
                     wait_time = retry_delays[attempt]
-                    logger.warning(f"⚠️  Rate Limit de TMDB alcanzado. Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
+                    logger.warning(f"[WARN]  Rate Limit de TMDB alcanzado. Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
                     time.sleep(wait_time)
                     continue # Siguiente intento del bucle
                     
@@ -60,10 +60,10 @@ class TMDBClient:
                 # Si fallamos por red, esperamos antes de reintentar
                 if attempt < max_retries - 1:
                     wait_time = retry_delays[attempt]
-                    logger.warning(f"⚠️  Error de red con TMDB ({e}). Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
+                    logger.warning(f"[WARN]  Error de red con TMDB ({e}). Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"❌  Error definitivo conectando a TMDB tras {max_retries} intentos: {e}")
+                    logger.error(f"[ERR]  Error definitivo conectando a TMDB tras {max_retries} intentos: {e}")
                     return None
 
     # Método para buscar películas
@@ -124,3 +124,21 @@ class TMDBClient:
             return data["results"][:5]
         
         return []
+
+    # Función para obtener los detalles completos de una película
+    def get_movie_details(self, movie_id: int) -> Optional[dict]:
+
+        """Obtiene los detalles completos de una película, incluyendo runtime."""
+
+        # En español por defecto
+        params = {"language": "es-ES"}
+        return self._get(f"/movie/{movie_id}", params)
+
+    # Función para obtener los detalles completos de una serie
+    def get_tv_details(self, tv_id: int) -> Optional[dict]:
+
+        """Obtiene los detalles completos de una serie, incluyendo episode_run_time."""
+
+        # En español por defecto
+        params = {"language": "es-ES"}
+        return self._get(f"/tv/{tv_id}", params)

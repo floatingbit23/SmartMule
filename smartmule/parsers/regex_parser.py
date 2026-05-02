@@ -18,29 +18,56 @@ EXTENSION_MAPPING = {
 
 # Mapa de normalización de idiomas (Alias -> Código Estándar)
 LANGUAGE_MAP = {
-    "SPANISH": "ES", "ESPAÑOL": "ES", "ESP": "ES", "SPA": "ES", "LATINO": "ES", "CASTELLANO": "ES",
-    "ENGLISH": "EN", "ENG": "EN", "INGLES": "EN", "INGLÉS": "EN",
-    "ITALIAN": "IT", "ITALIANO": "IT", "ITA": "IT",
-    "GERMAN": "DE", "DEUT": "DE", "GER": "DE",
-    "FRENCH": "FR", "FRE": "FR", "FRA": "FR",
+    "SPANISH": "ES", "ESPAÑOL": "ES", "ESP": "ES", "SPA": "ES", "LATINO": "ES", "CASTELLANO": "ES", "SP": "ES",
+    "ENGLISH": "EN", "ENG": "EN", "INGLES": "EN", "INGLÉS": "EN", "EN": "EN",
+    "ITALIAN": "IT", "ITALIANO": "IT", "ITA": "IT", "IT": "IT",
+    "GERMAN": "DE", "DEUT": "DE", "GER": "DE", "DE": "DE",
+    "FRENCH": "FR", "FRE": "FR", "FRA": "FR", "FR": "FR",
     "RUSSIAN": "RU", "RUS": "RU",
     "PORTUGUESE": "PT",
     "CHINESE": "ZH", "CHI": "ZH",
     "JAPANESE": "JP", "JAP": "JP"
 }
 
-# Etiquetas de P2P comunes a eliminar (Códecs, Calidades, Release Groups (ripeos), ...)
+# Etiquetas de P2P comunes a eliminar (Categorización, Códics, Calidades, Release Groups (ripeos), ...)
 SCENE_TAGS = [
-    r"hdrip", r"web-dl", r"x264", r"x265", r"hevc", r"aac", r"ac3", r"e-ac3",
-    r"bluray", r"brrip", r"proper", r"repack", r"webrip", r"dvdrip", r"xvid",
-    r"yify", r"yts", r"rarbg", r"xrg", r"vpp", r"ion10", r"psa", r"qxr", r"sparks", 
-    r"geckos", r"drones", r"amiable", r"divx", r"10b", r"hdr", r"ts", r"cam", r"bdrip",
-    r"galaxy", r"ethel", r"joy", r"hazmat", r"tigole", r"vyndros", r"evo", r"cyber",
-    r"yolow", r"btdx8", r"olimpo", r"p73", r"armor", r"mokona", r"bone", r"bkk", r"micro",
-    # Audio Tags
+    # Calidades y Formatos
+    r"hdrip", r"web-?dl", r"web-?rip", r"bluray", r"brrip", r"bdrip", r"dvdrip", r"dvd-?scr",
+    r"remux", r"hybrid", r"bdmux", r"telesync", r"ts", r"cam", r"hdcam", r"hdts", r"hdtv",
+    r"proper", r"repack", r"rerip", r"internal", r"remastered", r"uncut", r"unrated", r"uncensored",
+    r"imax", r"criterion", r"anniversary", r"extended", r"directors?.?cut", r"special.?edition",
+    r"theatrical", r"3d", r"sbs", r"half-?ou", r"half-?sbs", r"open.?matte", r"cc", r"v\.?o\.?s\.?",
+    
+    # Códecs y Tecnología
+    r"x264", r"x265", r"x266", r"hevc", r"h264", r"h265", r"h266", r"xvid", r"divx",
+    r"aac", r"ac3", r"e-ac3", r"dts", r"dts-?hd", r"truehd", r"atmos", r"8ch", r"6ch",
+    r"10bit", r"hi10p", r"hdr", r"hdr10", r"dolby.?vision", r"dv", r"dovi", r"hlg", r"pq", r"sdr",
+    
+    # Resoluciones
+    r"2160p", r"1080p", r"720p", r"480p", r"576p", r"4k", r"uhd", r"2k", r"hd",
+    
+    # Idiomas y Subtítulos
+    r"multi", r"dual", r"vostfr", r"subita", r"subesp", r"subfrench", r"spanishsub", r"englishsub",
+    
+    # Grupos Internacionales (Scene & P2P)
+    r"yify", r"yts", r"rarbg", r"psa", r"qxr", r"tigole", r"vyndros", r"evo", r"cyber",
+    r"yolow", r"sparks", r"geckos", r"drones", r"amiable", r"framestor", r"flux", r"ntb",
+    r"epsilon", r"don", r"hallowed", r"bhdstudio", r"ctrlhd", r"ebp", r"victor", r"kings",
+    r"tommy", r"flights", r"phoenix", r"cmrg", r"ntg", r"sic", r"thefarm", r"xepa",
+    r"amiable", r"rovers", r"strife", r"deflate", r"inflate", r"hdtim", r"hds", r"wiki",
+    r"amiable", r"megusta", r"skytrooper", r"juggs", r"fgt", r"rarbg", r"yts",
+    
+    # Grupos Españoles y eMule (Scene ES)
+    r"proteinicos", r"emulesonic", r"divxtotal", r"hispashare", r"elitetorrent",
+    r"exploradoresp2p", r"rodosky", r"mck", r"juanito", r"djt", r"punky", r"rodos",
+    r"pax", r"abril", r"alies", r"ett", r"donkey", r"mule", r"olimp", r"btdx8",
+    r"p73", r"armor", r"mokona", r"bone", r"bkk", r"micro", r"getb", r"istance",
+    r"toy", r"foracrew", r"nahom", r"cnzoo", r"swtyblz", r"davide29", r"rodosky",
+    r"mmtraxx", r"syncup", r"juanito",
+    
+    # Metadatos de Audio/Tech adicionales
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
-    # Additional Technical Tags
-    r"h\s*264", r"h\s*265", r"5\s*1", r"7\s*1", r"dts", r"10\s*bit", r"multi", r"hd\s*ts", r"hd\s*-\s*ts", r"ts\s*hq", r"runneo"
+    r"h\s*264", r"h\s*265", r"5\s*1", r"7\s*1", r"runneo", r"ddp", r"dd\+"
 ]
 
 # hdrip = High Definition Rip
@@ -75,7 +102,7 @@ def fix_mojibake(text: str) -> str:
     try:
         # El patrón típico de eMule: UTF-8 leído como Latin-1
         # Solo lo intentamos si detectamos caracteres sospechosos
-        if any(c in text for c in "ÃÂ"):
+        if any(c in text for c in "Ã Ã± Ã¡ Ã© Ã­ Ã³ Ãº"):
             return text.encode('latin-1').decode('utf-8')
     except (UnicodeEncodeError, UnicodeDecodeError):
         pass
@@ -119,7 +146,8 @@ def parse_filename(filename: str) -> dict:
 
     # Datos por defecto
     result = {
-        "title": base_name, 
+        "title": base_name,
+        "author": "",
         "year": None, 
         "season": None,
         "episode": None,
@@ -134,14 +162,18 @@ def parse_filename(filename: str) -> dict:
 
     # === REGEX ===
 
-    # Sustitución de separadores comunes por espacios.
-    clean_name = re.sub(r'[\._]', ' ', base_name)
+    # 1. Limpieza de dominios web (Buscamos esto ANTES de quitar los puntos)
+    # ej: Pelicula.com -> Pelicula
+    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)\b', ' ', base_name)
+
+    # 2. Sustitución de separadores comunes por espacios.
+    clean_name = re.sub(r'[\._]', ' ', clean_name)
     
     # === NORMALIZACIÓN INICIAL ===
     # Separar números de letras (ej: h265Español -> h265 Español)
     # Esto es CRÍTICO para que las regex posteriores (\b) funcionen con tags pegados.
-    clean_name = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', clean_name)
-    clean_name = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', clean_name)
+    clean_name = re.sub(r'([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])(\d)', r'\1 \2', clean_name)
+    clean_name = re.sub(r'(\d)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])', r'\1 \2', clean_name)
     
     # Extraer año (Buscamos 19xx o 20xx)
     year_match = re.search(r'\b(19\d{2}|20\d{2})\b', clean_name)
@@ -163,12 +195,15 @@ def parse_filename(filename: str) -> dict:
         result["episode"] = int(s_e_match.group(2))
         clean_name = clean_name.replace(s_e_match.group(0), " ") 
         
-    # Extraer Calidad de vídeo
+    # Extraer Calidad de vídeo y Resolución (720p, 1080p, 4K...)
     for q_tag in QUALITY_TAGS:
         q_match = re.search(r'\b' + q_tag + r'\b', clean_name, re.IGNORECASE)
         if q_match:
-            # Normalizamos quitando espacios para que sea '1080p' en lugar de '1080 p'
-            result["quality"] = q_match.group(0).lower().replace(" ", "")
+            val = q_match.group(0).lower().replace(" ", "")
+            result["quality"] = val
+            # Si el tag es una resolución conocida (según tus facetas de BDD), la guardamos en resolution
+            if re.match(r'\d{3,4}p|4k|uhd|2k', val):
+                result["resolution"] = val
             clean_name = clean_name.replace(q_match.group(0), " ")
             break
             
@@ -177,15 +212,19 @@ def parse_filename(filename: str) -> dict:
         clean_name = re.sub(r'(?i)\b' + tag + r'\b', ' ', clean_name)
 
     # Eliminar la firma del uploader (como "by mDudikoff" o "-GrpName")
-    clean_name = re.sub(r'(?i)\bby\s+[\w\d-]+\b', '', clean_name)
-    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+$', '', clean_name)
+    clean_name = re.sub(r'(?i)\bby\s+[\w]+\b', '', clean_name)
+    # Mejorada para capturar grupos al final (ej: -GETB8 o -GETB 8) sin romper títulos con guion
+    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+(\s*\d{1,2})?$', '', clean_name)
+    
+    # Limpiar prefijos inútiles al inicio (ej: FILM -, __, [DIVE - ITA])
+    clean_name = re.sub(r'(?i)^(film|video|movie|audio|documentary)\s*-\s*', '', clean_name)
     
     # Extraer resoluciones ANTES de borrarlas (ej: 1920x1080)
     res_matches = re.findall(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', clean_name)
     if res_matches:
         # Usamos set() para evitar duplicados y normalizamos quitando espacios (ej: 1920 x 1080 -> 1920x1080)
         res_clean = [r.lower().replace(" ", "") for r in res_matches]
-        result["resolution"] = ", ".join(sorted(list(set(res_clean))))
+        result["resolution"] = ", ".join(sorted(set(res_clean)))
     clean_name = re.sub(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', ' ', clean_name)
 
     # === EXTRACCIÓN Y NORMALIZACIÓN DE IDIOMAS ===
@@ -197,7 +236,7 @@ def parse_filename(filename: str) -> dict:
     # También buscamos códigos prefijados con + (ej: +ES)
     found_langs = re.findall(r'(?i)\b(?:[a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', clean_name)
     found_langs += re.findall(r'(?i)' + lang_pattern, clean_name)
-    found_langs += re.findall(r'(?i)\b(?:\+([a-z]{2,10}))\b', clean_name)
+    found_langs += re.findall(r'(?i)\b\+([a-z]{2,10})\b', clean_name)
 
     if found_langs:
         valid_codes = []
@@ -245,7 +284,7 @@ def parse_filename(filename: str) -> dict:
                 subs_found.append("Yes")
         
         if subs_found:
-            result["subtitles"] = "/".join(sorted(list(set(subs_found))))
+            result["subtitles"] = "/".join(sorted(set(subs_found)))
 
     # Limpieza de rastros de idiomas y subtítulos en el título
     clean_name = re.sub(r'(?i)\b([a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', ' ', clean_name)
@@ -254,11 +293,16 @@ def parse_filename(filename: str) -> dict:
     clean_name = re.sub(sub_pattern, ' ', clean_name)
     clean_name = re.sub(r'(?i)\b(hq)\b', ' ', clean_name) # Limpiamos HQ específicamente
 
-    # Eliminar paréntesis y corchetes que queden solos o tengan extras
+    # Limpieza inteligente de paréntesis y corchetes:
+    # 1. Quitar contenido de paréntesis o corchetes si parece una lista o metadata (contiene comas o espacios)
+    clean_name = re.sub(r'[\(\[][^\]\)]*,[^\]\)]*[\)\]]', ' ', clean_name)
+    # 2. Quitar tags de idioma pegados tipo "Spanishsub"
+    clean_name = re.sub(r'(?i)\b\w+sub\b', ' ', clean_name)
+    # 3. Quitar solo los símbolos para el resto, preservando el texto (títulos duales)
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
     # Quitar palabras técnicas y extensiones falsas (Lista extendida y más agresiva)
-    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv|hdts|runneo)\b', ' ', clean_name)
+    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv|hdts|runneo|sharethefiles|cinecalidad)\b', ' ', clean_name)
     
     # Quitar códecs con puntos o espacios (ej: H.264, DD5.1, DD5 1)
     clean_name = re.sub(r'(?i)\b(h[\.\s]?264|x[\.\s]?264|h[\.\s]?265|x[\.\s]?265|dd[\.\s]?5[\.\s]?1|ac3|dts|aac|av1|xvid|ld-aac)\b', ' ', clean_name)
@@ -274,14 +318,13 @@ def parse_filename(filename: str) -> dict:
     clean_name = re.sub(r'(?i)\b(bd|br|web|hd)1080p\b', ' ', clean_name)
     clean_name = re.sub(r'(?i)\b(telesync|ts|tc|hdts|hc-ts|hcsubs|camrip|cam|ld|md)\b', ' ', clean_name)
 
-    # Limpieza de dominios web avanzada (solo si llevan punto antes para evitar colisiones con "es", "me", etc.)
-    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|li|be|yt|us)\b', ' ', clean_name)
 
     # Eliminar puntuación residual pero PRESERVANDO apóstrofes internos para contracciones (He's, Don't)
     # Primero quitamos puntuación de los bordes de las palabras
     clean_name = re.sub(r'(?<![a-zA-Z])\'|\'(?![a-zA-Z])', '', clean_name)
     # Luego quitamos otros símbolos molestos excepto el apóstrofe y el guion
-    clean_name = re.sub(r'[^a-zA-Z0-9\'áéíóúÁÉÍÓÚñÑ\- ]', ' ', clean_name)
+    # Preservamos caracteres españoles áéíóúüñÁÉÍÓÚÜÑ
+    clean_name = re.sub(r'[^a-zA-Z0-9\'áéíóúüñÁÉÍÓÚÜÑ\- ]', ' ', clean_name)
 
     # Eliminar caracteres no-latinos "basura" al principio y al final
     clean_name = re.sub(r'^[^a-zA-Z0-9(]+', '', clean_name)
@@ -301,18 +344,29 @@ def parse_filename(filename: str) -> dict:
 
     # 4. Eliminar "cicatrices" de guiones dobles en medio (ej: "Titulo - - Subtitulo")
     clean_name = clean_name.replace('- -', '-')
+    clean_name = re.sub(r'\s+-\s*$', '', clean_name) # Guion huérfano al final
     
     # 5. Si después de todo queda vacío, devolvemos el original
     if not clean_name.strip():
         clean_name = base_name
 
-    result["title"] = clean_name.strip()
+    # === EXTRACCIÓN DE AUTOR (Para Libros y Música) ===
+    # Patrón común en P2P: "Autor - Titulo"
+    if media_type in ["book", "audio"] and " - " in clean_name:
+        parts = clean_name.split(" - ", 1)
+        result["author"] = parts[0].strip()
+        result["title"] = parts[1].strip()
+    else:
+        result["title"] = clean_name.strip()
 
     # --- DETERMINACIÓN DE CONFIANZA ---
+
     # Solo confiamos si tenemos año/temporada Y el título está MUY limpio
     if (result["year"] or result["season"]):
+
         # Penalizamos si quedan guiones huérfanos, caracteres raros o el título es muy corto
         has_noise = re.search(r'[+&/]', clean_name)
+
         # Si el título termina en guion o tiene guiones vacios, bajamos confianza
         is_clean = not has_noise and "." not in clean_name and " - -" not in clean_name
         

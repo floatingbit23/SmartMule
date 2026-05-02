@@ -36,7 +36,7 @@ By default, eMule places all completed downloads into a single `Incoming` folder
     -   **Archive Inspection**: The `ArchiveInspector` analyzes `.zip`, `.rar`, and `.7z` files searching for inconsistencies (e.g., an `.exe` disguised as a movie) and displaying suspicious content in the logs.
     -   **Critical Scores**: If a file has more than 5 detections on VT (prioritizing TOP engines like Microsoft or Kaspersky), it automatically moves it to a **Review** folder.
 
-*   **Intelligent Tie-Breaking**: Uses the release year to distinguish between movies with the same name (e.g., Solaris 1972 vs. Solaris 2002).
+*   **Intelligent Tie-Breaking**: Uses a heuristic scoring system based on release year and technical duration (FFmpeg) to distinguish between movies with the same name with surgical precision (e.g., Solaris 1972 vs. Solaris 2002).
 
 *   **Automated Triage**: 
     -   `MALICIOUS`: Automatic destructive deletion.

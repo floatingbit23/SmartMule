@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from smartmule.parsers.regex_parser import parse_filename, EXTENSION_MAPPING
 from smartmule.parsers.llm_parser import parse_with_llm
+from smartmule.parsers.media_inspector import inspect_media_file
 from smartmule.api.tmdb_client import TMDBClient
 from smartmule.api.openlibrary_client import OpenLibraryClient
 from smartmule.api.musicbrainz_client import MusicBrainzClient
@@ -18,10 +19,22 @@ logger = logging.getLogger("SmartMule.engine")
 class MetadataEngine:
 
     """
-    Orquestador principal del pipeline de enriquecimiento de archivos. Sigue una estructura de cascada:
-    1. Regex (rápido) -> Si OK, se salta la IA.
-    2. IA (lento, costoso) -> Si Regex falló o había baja confianza.
-    3. APIs (TMDB/OpenLibrary) -> Siempre se ejecuta, con el nombre limpio de cualquiera de los anteriores parsers.
+    Cerebro de SmartMule: Orquestador Multicanal del Pipeline de Enriquecimiento.
+    
+    Implementa una arquitectura de cascada inteligente para la identificación y clasificación 
+    de medios, optimizando recursos mediante cuatro capas de resolución:
+
+    1. Capa de Triaje (Regex): Extracción determinista de patrones estándar. 
+    Si la confianza es alta, se optimiza el flujo evitando el coste de la IA.
+   
+    2. Capa Semántica (LLM): Análisis heurístico mediante IA (Gemini/LM Studio) para resolver 
+       nombres de archivos altamente ofuscados o con estructuras no convencionales.
+    
+    3. Capa de Inspección Técnica (FFmpeg): Extracción de metadatos físicos (duración, 
+       resolución) utilizada como factor de desempate (tie-breaking) en homónimos.
+    
+    4. Capa de Enriquecimiento y Seguridad: Consolidación de datos vía APIs oficiales 
+       (TMDB, MusicBrainz, OpenLibrary) y triaje de seguridad preventivo con VirusTotal.
     """
     
     # Constructor de la clase MetadataEngine
@@ -41,14 +54,14 @@ class MetadataEngine:
         Ahora soporta carpetas buscando un archivo representante.
         Si se proporciona ed2k_hash y BBDD, verifica la caché antes de gastar recursos de API.
         """
-        filename, display_name, technical_target = self._resolve_target(filename, filepath)
-        logger.info(f"🔍  Identificando archivo [{filename}]...")
+        filename, _, technical_target = self._resolve_target(filename, filepath)
+        logger.info(f"[i] Identificando archivo [{filename}]...")
 
-        # --- CACHÉ DE BÚSQUEDAS (API Optimization) ---
+        # --- CACHE DE BÚSQUEDAS (API Optimization) ---
         if self.db and ed2k_hash:
             cached_data = self.db.get_metadata_cache(ed2k_hash)
             if cached_data:
-                logger.info(f"⚡ ¡Caché Hit! Metadatos recuperados instantáneamente para {ed2k_hash[:8]}...")
+                logger.info(f"[CACHE] Hit! Metadatos recuperados para {ed2k_hash[:8]}...")
                 return cached_data
 
         # ================= CAPA 1 y 2: Regex Simple y Análisis IA =================
@@ -56,11 +69,25 @@ class MetadataEngine:
 
         titulo_limpio = data.get("title", "")
         media_type = data.get("media_type", "unknown")
-        logger.info(f"✨  Nombre limpio: '{titulo_limpio}' ({media_type})")
+        logger.info(f"[OK] Nombre limpio: '{titulo_limpio}' ({media_type})")
 
         # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
         if self._inspect_compressed(data, filename, technical_target):
             return data
+
+        # ================= CAPA 2.7: Inspección Técnica (FFmpeg) =================
+
+        # Solo para video, para permitir el desempate (Tie-Breaking) por duración.
+        if media_type in ["video", "movie", "tv series"] and technical_target:
+            tech_data = inspect_media_file(technical_target)
+            if tech_data.get("is_media"):
+                data["technical"] = tech_data
+                if tech_data.get("width") and not data.get("resolution"):
+                    # Si el regex no encontró resolución pero ffprobe sí -> la actualizamos
+                    h = tech_data["height"]
+                    if h >= 2160: data["resolution"] = "2160p"
+                    elif h >= 1080: data["resolution"] = "1080p"
+                    elif h >= 720: data["resolution"] = "720p"
 
         # ================= CAPA 3: APIs Oficiales y Triaje VT =================
         self._enrich_with_apis(data, filename, technical_target)
@@ -72,63 +99,98 @@ class MetadataEngine:
 
         return data
 
+
+    # ==================== MÉTODOS PRIVADOS DE RESOLUCIÓN ====================
+
+
+    # Función que gestiona la lógica de si es un directorio o archivo, y la selección del archivo representante.
     def _resolve_target(self, filename: str, filepath: str) -> tuple[str, str, str]:
+
+        # Se inicializan los valores de nombre, display y target
         item_path = Path(filepath) if filepath else Path(filename)
         display_name = filename
         technical_target = filepath or filename
 
+        # Si es un directorio, se busca el archivo representativo
         if item_path.is_dir():
-            logger.info(f"📂  Procesando directorio: {display_name}")
+            logger.info(f"[DIR] Procesando directorio: {display_name}")
             representative = self._find_representative_file(item_path)
             
+            # Si se encuentra un archivo representativo, se actualizan los valores
             if representative:
                 technical_target = str(representative)
-                logger.info(f"🔍  Archivo representante encontrado: {representative.name}")
+                logger.info(f"[i] Archivo representante encontrado: {representative.name}")
+                
+                # Si el nombre del archivo es genérico (ej. movie, video, cd1, cd2), se usa el nombre de la carpeta
                 if len(representative.stem) < 5 or representative.stem.lower() in ["movie", "video", "cd1", "cd2"]:
-                    logger.info("ℹ️  Usando nombre de carpeta para identificar (nombre de archivo genérico)")
+                    logger.info("[INFO] Usando nombre de carpeta para identificar (nombre de archivo genérico)")
+                # En caso contario, se usa el nombre del archivo representante    
                 else:
                     filename = representative.name
+
+            # Si no se encuentra un archivo representativo, se usa el filepath
             else:
                 technical_target = filepath
-                logger.warning(f"⚠️  No se encontró un archivo multimedia claro en la carpeta {display_name}")
+                logger.warning(f"[WARN] No se encontró un archivo multimedia claro en la carpeta {display_name}")
 
         return filename, display_name, technical_target
 
+
+    # Función que aplica el análisis de Regex y IA.
     def _apply_regex_and_ai(self, filename: str) -> dict:
+
         data = parse_filename(filename)
         
+        # Si el análisis de Regex es de baja confianza, se aplica el análisis de IA.
         if data.get("confidence") == "low":
             context_data = {
                 "languages": data.get("languages"),
                 "subtitles": data.get("subtitles")
             }
+
             ai_data = parse_with_llm(filename, context=context_data)
             
+            # Si el análisis de IA es exitoso, se actualizan los valores
             if ai_data.get("confidence") != "failed":
+
                 ai_data["extension"] = data.get("extension")
                 ai_data["resolution"] = data.get("resolution", "")
                 ai_data["languages"] = data.get("languages", "")
                 ai_data["subtitles"] = data.get("subtitles", "")
                 
+                # Si el tipo de medio es desconocido, se usa el tipo de medio que asignó Regex
                 if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
                     ai_data["media_type"] = data.get("media_type")
                     
                 data = ai_data
+
             else:
-                logger.warning("❌  Análisis por IA falló. Volviendo al resultado regular de Capa 1.")
+                logger.warning("[ERROR] Análisis por IA falló. Volviendo al resultado de Regex...")
+
         return data
 
+
+    # Función que inspecciona archivos comprimidos.
+    # Devuelve un booleano para indicar si el proceso debe abortarse por seguridad.
     def _inspect_compressed(self, data: dict, filename: str, technical_target: str) -> bool:
+
         media_type = data.get("media_type")
+
+        # Si el tipo de medio es "compressed" y se proporciona un target técnico, se inspecciona el archivo.
         if media_type == "compressed" and technical_target:
+
             from smartmule.parsers.archive_inspector import inspect_archive
                 
-            logger.info("🗜️  Archivo comprimido detectado. Iniciando análisis...")
+            logger.info("[ZIP] Archivo comprimido detectado. Iniciando análisis...")
             inspection = inspect_archive(technical_target, expected_type=media_type)
             
+            # Si el archivo es malicioso o sospechoso, se aborta el proceso por seguridad
             if inspection["status"] in ["MALICIOUS", "SUSPICIOUS"]:
-                logger.warning("🛑  Triaje de seguridad abortado por Inconsistencia Semántica o Cifrado.")
-                veredicto = "[91mMALICIOUS !!![0m" if inspection["status"] == "MALICIOUS" else "[93mSUSPICIOUS ![0m"
+
+                logger.warning("[BLOCK] Triaje de seguridad abortado por Inconsistencia Semántica o Cifrado.")
+                
+                veredicto = "\033[91mMALICIOUS !!!\033[0m" if inspection["status"] == "MALICIOUS" else "\033[93mSUSPICIOUS !\033[0m"
+                
                 data["api_data"] = {
                     "source": "Semantic Inspector",
                     "official_title": filename,
@@ -137,70 +199,160 @@ class MetadataEngine:
                     "suspicious_count": 0,
                     "url": "N/A (Semantic Malware)"
                 }
+
                 return True
                 
+            # Si el archivo es seguro y se detecta un tipo de medio, se reclasifica el media_type y se actualiza el archivo representante.
             if inspection["status"] == "SAFE" and inspection.get("detected_media"):
-                logger.info(f"🔄 Reclasificando media_type por contenido interno: 'compressed' -> '{inspection['detected_media']}'")
+                
+                logger.info(f"[RETRY] Reclasificando media_type: 'compressed' -> '{inspection['detected_media']}'")
                 data["media_type"] = inspection["detected_media"]
+
+                # Si se encuentra un archivo representante, se actualiza
                 if inspection.get("representative"):
                     data["internal_representative"] = Path(inspection["representative"]).name
+
         return False
 
+
+    # Función que enriquece los datos con información de APIs externas.
     def _enrich_with_apis(self, data: dict, filename: str, technical_target: str):
+
+        """
+        Delegador principal que, dependiendo del "media_type", redirige el tráfico a métodos ultra-específicos:
+            - _query_tmdb: Lógica de scoring y desempate de películas/series.
+            - _query_openlibrary: Lógica y filtros de similitud para libros.
+            - _query_musicbrainz: Limpieza NFKD (Normalización Unicode) y filtros para audio.
+            - _scan_software: Triaje exhaustivo con VirusTotal para ejecutables
+        """
+
         titulo_limpio = data.get("title", "")
         media_type = data.get("media_type", "unknown")
         year = data.get("year")
 
         if media_type in ["video", "tv series", "movie"]: 
             self._query_tmdb(data, titulo_limpio, year)
+
         elif media_type == "book":
             self._query_openlibrary(data, titulo_limpio)
+
         elif media_type == "audio":
             self._query_musicbrainz(data, titulo_limpio)
+
         elif media_type == "subtitles":
-            logger.info("📝  Subtítulos detectados.")
+            logger.info("[SUBS] Subtítulos detectados.")
+
         elif media_type in ["software", "compressed"]:
             self._scan_software(data, filename, technical_target)
-        else:
-            logger.info("❓  Tipo de medio desconocido, omitiendo búsqueda en APIs.")
 
-    def _query_tmdb(self, data: dict, titulo_limpio: str, year: str):
-        if data.get("season"):
-            logger.info("📺 Buscando en TMDB como Serie...")
-            results = self.tmdb.search_tv(titulo_limpio, year) 
         else:
-            logger.info("🎬 Buscando en TMDB como Película...")
+            logger.info("[!] Tipo de medio desconocido, omitiendo búsqueda en APIs.")
+
+
+    # Función que realiza la búsqueda en TMDB y aplica scoring.
+    def _query_tmdb(self, data: dict, titulo_limpio: str, year: str):
+
+        if data.get("season"):
+            logger.info("[TV] Buscando en TMDB como Serie...")
+            results = self.tmdb.search_tv(titulo_limpio, year) 
+
+        else:
+            logger.info("[MOVIE] Buscando en TMDB como Película...")
             results = self.tmdb.search_movie(titulo_limpio, year)
 
         if not results:
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+
             if titulo_alternativo:
-                logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                logger.info(f"[RETRY] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+
                 if data.get("season"):
                     results = self.tmdb.search_tv(titulo_alternativo, year)
+
                 else:
                     results = self.tmdb.search_movie(titulo_alternativo, year)
 
+        """
+        Sistema de Scoring Heurístico para Desempate (Tie-Breaking):
+        
+        Ante múltiples resultados de la API, aplicamos un sistema de puntos (scoring) para seleccionar la mejor coincidencia:
+        
+        1. Título Exacto (+50 pts): Si el nombre del archivo (limpio) coincide exactamente con el de la API.
+
+        2. Año de Producción (+30 pts): Si el año extraído del archivo coincide con la fecha de lanzamiento.
+
+        3. Validación Técnica (FFmpeg) (+40 pts): El factor más fiable. Comparamos la duración real del archivo con el 'runtime' oficial de TMDB:
+            - Diferencia <= 5 min: +40 pts (Bonus de confianza máxima).
+            - Diferencia <= 15 min: +15 pts (Cierta tolerancia por versiones extendidas/cortadas).
+            
+        Este sistema permite distinguir con precisión entre películas homónimas (ej. "Solaris" 1972 vs 2002).
+        """
+
         if results:
+
             best_match = results[0]
             best_score = -1 
+
             for res in results:
+
                 score = 0
+
+                # Obtenemos el título y la fecha de la API
                 res_title = res.get("title") or res.get("name")
                 res_date = res.get("release_date") or res.get("first_air_date") or ""
                 
+                # 1. Título Exacto
                 if res_title.lower() == titulo_limpio.lower():
                     score += 50
+
+                # 2. Año de Producción
                 if year and str(year) in res_date:
                     score += 30
+                
+                # --- TIE-BREAKING POR DURACIÓN (FFmpeg) ---
+                # Si tenemos datos técnicos del archivo, comparamos con la duración de TMDB
+                tech = data.get("technical")
+                if tech and tech.get("duration_sec"):
+                    file_dur_min = tech["duration_sec"] // 60
+                    
+                    # Para obtener la duración real (runtime), necesitamos pedir los detalles del ID
+                    res_id = res.get("id")
+
+                    if res_id:
+
+                        if data.get("season"):
+
+                            details = self.tmdb.get_tv_details(res_id)
+
+                            # En series, TMDB devuelve una lista de duraciones de episodio
+                            durations = details.get("episode_run_time", [])
+                            api_runtime = durations[0] if durations else 0
+
+                        else:
+                            details = self.tmdb.get_movie_details(res_id)
+                            api_runtime = details.get("runtime", 0)
+                        
+                        if api_runtime > 0:
+
+                            diff = abs(file_dur_min - api_runtime)
+
+                            if diff <= 5: # Margen de 5 minutos (créditos, intros, etc.)
+                                score += 40
+                                logger.info(f"[MATCH] Duración coincide ({api_runtime} min). Bonus +40.")
+
+                            elif diff <= 15:
+                                score += 15
+                                logger.debug(f"[DIFF] Duración cercana ({api_runtime} min). Bonus +15.")
                 
                 if score > best_score:
                     best_score = score
                     best_match = res 
 
+            # Actualizamos los datos de la película con la mejor coincidencia
             api_result = best_match
             poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
             
+            # Guardamos los datos obtenidos de TMDB
             data["api_data"] = {
                 "source": "TMDB",
                 "official_title": api_result.get("name") or api_result.get("title"),
@@ -210,20 +362,22 @@ class MetadataEngine:
                 "overview": api_result.get("overview")
             }
 
+    
+    # Función que realiza la búsqueda en OpenLibrary y aplica scoring.
     def _query_openlibrary(self, data: dict, titulo_limpio: str):
-        logger.info("📚 Buscando en OpenLibrary como Libro...")
+        logger.info("[BOOK] Buscando en OpenLibrary como Libro...")
         api_result = self.openlibrary.search_book(titulo_limpio)
 
         if not api_result:
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
             if titulo_alternativo:
-                logger.info(f"🔄 Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                logger.info(f"[RETRY] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
                 api_result = self.openlibrary.search_book(titulo_alternativo)
 
         if api_result:
             similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
             if similitud < 0.7:
-                logger.warning(f"⚠️  Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
+                logger.warning(f"[WARN] Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
             else:
                 data["api_data"] = {
                     "source": "OpenLibrary",
@@ -234,18 +388,28 @@ class MetadataEngine:
                     "score": api_result.get("ratings_average")
                 }
 
+
+    # Función que realiza la búsqueda en MusicBrainz y aplica scoring.
     def _query_musicbrainz(self, data: dict, titulo_limpio: str):
-        logger.info("🎵  Buscando en MusicBrainz como Audio...")
+
+        logger.info("[AUDIO] Buscando en MusicBrainz como Audio...")
+
         api_result = self.musicbrainz.search_audio(titulo_limpio)
 
         if not api_result:
+
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
+
             if titulo_alternativo:
-                logger.info(f"🔄  Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
+                logger.info(f"[RETRY] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
                 api_result = self.musicbrainz.search_audio(titulo_alternativo)
         
         if api_result:
+
+            # Función auxiliar para normalizar texto y facilitar la comparación.
             def normalizar_comparacion(s):
+
+                # Normaliza el texto eliminando acentos y caracteres especiales
                 sn = "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).lower()
                 return re.sub(r'[^a-z0-9]', '', sn)
 
@@ -260,8 +424,11 @@ class MetadataEngine:
             similitud_completa = SequenceMatcher(None, search_name_clean, full_api_clean).ratio()
             contiene_titulo = api_title_clean in search_name_clean and len(api_title_clean) > 2
 
+            # Si la similitud es menor al 65% y no contiene el título, se descarta.
             if similitud_completa < 0.65 and not contiene_titulo:
-                logger.warning(f"⚠️  Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
+                logger.warning(f"[WARN] Audio descartado por baja similitud ({int(similitud_completa*100)}%): '{api_artist} - {api_title}' vs '{titulo_limpio}'")
+            
+            # Si la similitud es alta o contiene el título, se guarda.
             else:
                 data["api_data"] = {
                     "source": "MusicBrainz",
@@ -271,25 +438,37 @@ class MetadataEngine:
                     "score": api_result.get("score") 
                 }
 
+
+    # Función que realiza el triaje de seguridad del archivo.
     def _scan_software(self, data: dict, filename: str, technical_target: str):
+
         internal_name = data.get("internal_representative")
         target_info = f"-> [{internal_name}]" if internal_name else ""
 
+        # Extensiones de Office que contienen macros.
         office_macros = {
             ".xlsm", ".xlsb", ".docm", ".pptm", ".dotm", ".ppsm", ".potm", ".xltm", ".xlam",
             ".doc", ".xls", ".ppt", ".one", ".iqy", ".slk", ".pdf"
         }
 
         extension = data.get("extension", "").lower()
+
+        # Si la extensión es de Office, se marca como sospechoso.
         if extension in office_macros:
-             logger.warning(f"🛡️  [Seguridad] {filename} contiene Macros de Office!! Lo trataré como ejecutable para triaje preventivo...")
+             logger.warning(f"[SEC] {filename} contiene Macros de Office!! Lo trataré como ejecutable para triaje preventivo...")
 
-        logger.info(f"💾  Software/Archivo comprimido detectado {target_info}. Iniciando triaje de seguridad con VirusTotal...")
+        # Iniciamos el triaje de seguridad.
+        logger.info(f"[SW] Software/Archivo comprimido detectado {target_info}. Iniciando triaje de seguridad con VirusTotal...")
 
+        # Si se proporciona un target técnico (Hash/Path)
         if technical_target:
+
+            # Realizamos el escaneo.
             vt_result = self.virustotal.scan_software(technical_target)
 
+            # Si el archivo se encuentra en VirusTotal, se guarda.
             if vt_result:
+
                 stats = vt_result["stats"]
                 results = vt_result["results"]
                 file_hash = vt_result["hash"]
@@ -297,28 +476,44 @@ class MetadataEngine:
                 malicious = stats.get("malicious", 0)
                 suspicious = stats.get("suspicious", 0)
 
+                # Lista de los motores de antivirus más top.
                 TOP_ANTIVIRUS = [
                     "Microsoft", "Kaspersky", "ESET-NOD32", "BitDefender", 
                     "Symantec", "Sophos", "TrendMicro", "FireEye", "CrowdStrike"
                 ]
                 
                 top_threats = []
+                
+                # Buscamos si algún motor top detectó el archivo como malicioso.
                 for engine in TOP_ANTIVIRUS:
                     res = results.get(engine)
+                    # En caso afirmativo, se añade a la lista de amenazas.
                     if res and res.get("category") == "malicious":
                         top_threats.append(engine)
 
+                # Asignamos el veredicto según la cantidad de detecciones:
+
+                # Si hay al menos 1 detección por parte de Motor Antivirus Top, se marca como malicioso.
                 if top_threats:
                     veredicto = f"\033[91mMALICIOUS !!! (Detected by: {', '.join(top_threats)})\033[0m"
+                
+                # Si no hay detecciones por parte de motores Top, se revisa el resto de motores.
                 elif malicious == 0 and suspicious == 0:
                     veredicto = "\033[92mSAFE\033[0m"
+                
+                # Si hay entre 1 y 5 detecciones, se marca como sospechoso.
                 elif 1 <= malicious <= 5:
                     veredicto = "\033[93mSUSPICIOUS\033[0m"
+
+                # Si hay más de 5 detecciones, se marca como malicioso.
                 elif malicious > 5:
                     veredicto = "\033[91mMALICIOUS\033[0m"
-                else:
-                    veredicto = "\033[93mSUSPICIOUS\033[0m"
                 
+                # Si no se detecta como malicioso ni sospechoso, se marca como seguro.
+                else:
+                    veredicto = "\033[92mSAFE\033[0m"
+                
+                # URL del archivo en VirusTotal.
                 vt_url = f"https://www.virustotal.com/gui/file/{file_hash}" if stats.get("suspicious") != -1 else None
 
                 data["api_data"] = {
@@ -331,29 +526,41 @@ class MetadataEngine:
                     "url": vt_url
                 }
                 
+                # Si el archivo no se encuentra en VirusTotal, se marca como desconocido.
                 if stats.get("suspicious") == -1:
                     data["api_data"]["veredicto"] = "\033[93mUNKNOWN (Not found in VT)\033[0m"
-        else:
-            logger.warning("⚠️  No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
 
+        else:
+            logger.warning("[WARN] No se proporcionó Filepath para hacer el triaje SHA-256 del software.")
+
+
+    # Función que muestra los metadatos encontrada en formato de tarjeta.
     def _log_metadata_card(self, data: dict):
+
         if data.get("api_data"):
+
             ad = data["api_data"]
-            logger.info(f"✅ ¡Metadatos Encontrados/Analizados en {ad['source']}!")
+
+            logger.info(f"[DONE] Metadatos Encontrados/Analizados en {ad['source']}!")
+
             logger.info(f"    - Título: {ad.get('official_title')}")
+
             if ad.get("date"):
                logger.info(f"    - Fecha/Año: {ad['date']}")
+
             if ad.get("author"):
                 logger.info(f"    - Autor/Artista: {ad['author']}")
+
             if ad.get("score"):
                 logger.info(f"    - Relevancia/Nota: {ad['score']}")
             
             if ad.get("veredicto"):
                 logger.info(f"    - Seguridad: {ad['veredicto']}")
+
                 if ad.get("url"):
                     logger.info(f"    - Informe VT: {ad['url']}")
         else:
-            logger.info("⚠️  No se obtuvieron metadatos oficiales de las APIs.")
+            logger.info("[WARN] No se obtuvieron metadatos oficiales de las APIs.")
 
 
     # Método privado para obtener el título alternativo
@@ -392,16 +599,21 @@ class MetadataEngine:
             return max(valid_files, key=lambda f: f.stat().st_size)
 
         except Exception as e:
-            logger.warning(f"⚠️  Error al buscar archivo representante en {directory.name}: {e}")
+            logger.warning(f"[WARN] Error al buscar archivo representante en {directory.name}: {e}")
             return None
             
+    
+    # Función que extrae la primera parte del título antes de un 'aka'.
+    # Nota: "aka" es una abreviatura de "also known as" y se usa para indicar que el título es una versión alternativa de algo.
     def _get_plan_b_title(self, title: str) -> Optional[str]:
 
-        """
-        Extrae la primera parte del título antes de un 'aka' (con cualquier variante de mayúsculas).
-        """
+        # Si el título contiene 'aka' (con cualquier variante de mayúsculas)
+        if re.search(r'\s+aka\s+', title, re.IGNORECASE): 
 
-        if re.search(r'\s+aka\s+', title, re.IGNORECASE): # Si el título contiene 'aka' (con cualquier variante de mayúsculas)
-            parts = re.split(r'\s+aka\s+', title, maxsplit=1, flags=re.IGNORECASE) # Dividimos por el primer 'aka' que encontremos
-            return parts[0].strip() # Devolvemos la primera parte del título
+            # Dividimos por el primer 'aka' que encontremos
+            parts = re.split(r'\s+aka\s+', title, maxsplit=1, flags=re.IGNORECASE) 
+
+            # Devolvemos la primera parte del título
+            return parts[0].strip() 
+
         return None # Si no se encuentra 'aka', devolvemos None

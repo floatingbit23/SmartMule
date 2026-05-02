@@ -85,6 +85,6 @@ def inspect_media_file(filepath: str) -> Dict:
         logger.debug(f"🔍 [Inspector] Duración detectada: {duration_min} min ({filepath})") # Muestra la duración
 
     except Exception as e:
-        logger.warning(f"⚠️  [Inspector] No se pudieron leer los metadatos de {path.name}: {e}")
+        logger.warning(f"[WARN]  [Inspector] No se pudieron leer los metadatos de {path.name}: {e}")
 
     return result

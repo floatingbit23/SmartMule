@@ -10,7 +10,7 @@ def test_inspect_media_file_success():
     """
     mock_ffprobe_output = {
         "format": {
-            "duration": "7200.5" # 2 horas y media
+            "duration": "7200.5" # 2 horas
         },
         "streams": [
             {

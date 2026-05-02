@@ -21,7 +21,7 @@ def send_notification(title: str, message: str, is_critical: bool = False):
         timeout = 10 if is_critical else 5
         
         notification.notify( # Envía la notificación 
-            title=f"SmartMule 🫏 - {title}",
+            title=f"SmartMule - {title}",
             message=message,
             app_name="SmartMule", 
             timeout=timeout
@@ -30,4 +30,4 @@ def send_notification(title: str, message: str, is_critical: bool = False):
     except Exception as e:
         # Las notificaciones pueden fallar en entornos sin GUI o si faltan dependencias del SO (e.g. en Linux headless).
         # Lo registramos como debug para no sobrecargar los logs principales.
-        logger.debug(f"ℹ️  No se pudo lanzar la notificación de escritorio: {e}")
+        logger.debug(f"[INFO]  No se pudo lanzar la notificación de escritorio: {e}")

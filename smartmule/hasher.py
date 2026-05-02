@@ -294,5 +294,5 @@ def get_main_file_in_dir(dir_path: Path) -> Optional[Path]:
         return max(files, key=lambda f: f.stat().st_size)
 
     except Exception as e:
-        logger.warning(f"⚠️  No se pudo determinar el archivo principal en {dir_path.name}: {e}")
+        logger.warning(f"[WARN]  No se pudo determinar el archivo principal en {dir_path.name}: {e}")
         return None

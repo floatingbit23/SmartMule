@@ -610,17 +610,17 @@ HERRAMIENTAS ADMINISTRATIVAS:
   -h, --help        Muestra este manual de usuario.
 """,
         formatter_class=argparse.RawTextHelpFormatter,
-        usage="python main.py [start|stop] [opciones]",
+        usage="smartmule [start|stop] [opciones]",
         epilog="""
 EJEMPLOS DE USO:
-  > python main.py start              # Iniciar SmartMule
-  > python main.py stop               # Detener SmartMule
-  > python main.py --stats            # Ver inventario y estadísticas
-  > python main.py --status           # Chequear salud del sistema
-  > python main.py --config           # Ver configuración activa
-  > python main.py --log 50           # Ver ultimas 50 lineas del log
-  > python main.py --pid              # Ver PID activo
-  > python main.py --purge "Matrix"   # Limpiar archivos por búsqueda
+  > smartmule start              # Iniciar SmartMule
+  > smartmule stop               # Detener SmartMule
+  > smartmule --stats            # Ver inventario y estadísticas
+  > smartmule --status           # Chequear salud del sistema
+  > smartmule --config           # Ver configuración activa
+  > smartmule --log 50           # Ver ultimas 50 lineas del log
+  > smartmule --pid              # Ver PID activo
+  > smartmule --purge "Matrix"   # Limpiar archivos por búsqueda
 \n"""
     )
     
@@ -698,7 +698,8 @@ EJEMPLOS DE USO:
     if active_pid:
         print(f"\n[!] [CRITICAL] SmartMule ya esta corriendo en 2º plano (PID: {active_pid}).")
         print("\n[i] Para detenerlo antes de iniciar otra instancia, ejecuta:")
-        print("> Si estás trabajando desde el proyecto: python main.py stop")
+        print("> Si estás en el proyecto: python3 main.py stop")
+        print("> Si usas el alias: smartmule stop")
         print(f"> Si estás trabajando desde Powershell/CMD: taskkill /PID {active_pid} /F")
         print(f"> Si estás trabajando desde Linux: kill {active_pid}")
         sys.exit(1)
