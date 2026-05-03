@@ -53,7 +53,7 @@ By default, eMule places all completed downloads into a single `Incoming` folder
 
 *   **Privacy**: Compatible with local models (LM Studio) to process names without uploading them to the cloud.
 
-*  **Ultra-low resource usage**: SmartMule is designed to run in the background without interfering with normal PC usage. To achieve this, it sets minimal I/O (`IOPRIO_VERYLOW`) and CPU (`IDLE_PRIORITY_CLASS`) priorities, ensuring the OS only allocates resources to the process when no other applications are demanding them.
+*   **Ultra-low resource usage**: SmartMule is designed to run in the background without interfering with normal PC usage. It sets minimal I/O (`IOPRIO_VERYLOW`) and CPU (`IDLE_PRIORITY_CLASS`) priorities, ensuring the OS only allocates resources when no other applications are demanding them. Additionally, it uses **SQLite WAL mode** to allow instant searches even while the engine is organizing heavy files.
 
 ---
 

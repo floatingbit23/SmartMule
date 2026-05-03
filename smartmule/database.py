@@ -168,6 +168,11 @@ class HashDatabase:
         # Abro la conexión con la BBDD SQLite.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
 
+        # Habilitamos el modo WAL (Write-Ahead Logging) para mejorar la concurrencia.
+        # Esto permite que el Watcher y el Worker operen simultáneamente sin bloqueos 'database is locked'.
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA synchronous=NORMAL;")
+
         # Devuelvo filas personalizadas que se comportan como diccionarios. Esto facilita el acceso por nombre de columna
         self._conn.row_factory = sqlite3.Row
 
@@ -624,14 +629,23 @@ class HashDatabase:
         """
 
         # SQL que calcula la distancia de Levenshtein mínima entre el nombre de archivo (sin extensión) y el título oficial
-        # Nota: SQLite no permite usar el alias 'dist' en el WHERE directamente.
+        # Filtrado por longitud de cadena: solo evaluamos registros cuyo nombre sea de tamaño similar (+/- 3 caracteres).
+        min_len = max(0, len(query) - 3)
+        max_len = len(query) + 3
+
+        """
+        SQLite ejecutará la función Levenshtein en Python solo sobre los registros que tienen una longitud de nombre similar al término de búsqueda (margen de +/- 3 caracteres). 
+        Esto convierte una búsqueda costosa de O(N) en una operación filtrada extremadamente rápida de O(filtrado), ideal para bibliotecas con miles de archivos.
+        """
+
         sql = """
             SELECT *, 
                    MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) as dist
             FROM files 
-            WHERE MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) <= ?
+            WHERE (LENGTH(stem(file_name)) BETWEEN ? AND ? OR LENGTH(official_title) BETWEEN ? AND ?)
+              AND MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) <= ?
         """
-        all_params = [query, query, query, query, max_distance]
+        all_params = [query, query, min_len, max_len, min_len, max_len, query, query, max_distance]
 
         if filter_conditions:
             for cond in filter_conditions:

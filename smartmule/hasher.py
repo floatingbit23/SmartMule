@@ -26,6 +26,7 @@ import time
 import threading
 import os
 import concurrent.futures
+import collections
 from typing import Optional
 from pathlib import Path
 
@@ -77,14 +78,14 @@ def _process_file_in_parallel(file_path: Path) -> list[bytes]:
         # Uso ThreadPoolExecutor para calcular hashes en paralelo, con un máximo de hilos y bloques pendientes
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
 
-            futures = [] # Lista para almacenar las tareas pendientes
+            futures = collections.deque() # Cola eficiente para almacenar las tareas pendientes (O(1) en pop)
 
             while True:
 
                 # Control de flujo para no saturar la RAM con bloques pendientes
                 # Se procesa el resultado del bloque más antiguo si se alcanza el límite de bloques pendientes
                 if len(futures) >= max_pending:
-                    chunk_hashes.append(futures.pop(0).result()) # Espera a que termine el primer bloque y lo añade a la lista
+                    chunk_hashes.append(futures.popleft().result()) # Espera a que termine el primer bloque y lo añade a la lista
                     continue # Vuelve al inicio del bucle para procesar el siguiente bloque
 
                 chunk = f.read(ED2K_CHUNK_SIZE) # Lee el siguiente bloque de 9.28MB

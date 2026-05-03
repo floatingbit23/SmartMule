@@ -219,12 +219,18 @@ class IncomingHandler(FileSystemEventHandler):
 
         # Segundo: Si es un directorio que EXISTE, miramos su contenido.
         if file_path.is_dir():
+
             try:
-                # rglob('*') es recursivo.
-                for sub_item in file_path.rglob('*'):
+                # Solo miramos el primer nivel de la carpeta. 
+                # Porque si es una descarga incompleta de eMule/P2P, los archivos de control (.part, .met) SIEMPRE estarán en la raíz del ítem. 
+                for sub_item in file_path.iterdir():
+                    
+                    # Si hay algún archivo con extensión prohibida dentro de la carpeta...
                     if sub_item.is_file() and self._is_extension_ignored(sub_item):
-                        logger.debug(f"[DIR] Directorio '{file_path.name}' ignorado (contiene archivos temporales: {sub_item.name})")
+                        # Ignoro la carpeta y salgo.
+                        logger.debug(f"[DIR] Directorio '{file_path.name}' ignorado (archivo temporal detectado en raíz: {sub_item.name})")
                         return True
+
             except Exception as e:
                 logger.warning(f"[WARN] Error al inspeccionar contenido de carpeta {file_path.name}: {e}")
             

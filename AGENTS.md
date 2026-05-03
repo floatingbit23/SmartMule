@@ -48,14 +48,30 @@ Copy `.env.example` to `.env` and configure paths and API keys.
 - `smartmule/organizer.py`: Moves and renames files based on metadata.
 - `smartmule/database.py`: Persists file status, metadata, and fingerprints.
 
-### Key Logic: Tie-Breaking
-When an LLM provides multiple matches for a title, SmartMule uses `ffprobe` to compare file duration against TMDB data to select the correct production.
+### Key Logic: Tie-Breaking & Search
+- **Tie-Breaking**: When an LLM provides multiple matches for a title, SmartMule uses `ffprobe` to compare file duration against TMDB data to select the correct production.
+- **Fuzzy Search Optimization**: To prevent Python-based N+1 bottlenecks, fuzzy searches in `database.py` use a **SQL length pre-filter** (`LENGTH(...) BETWEEN X AND Y`) before calling the expensive Levenshtein function.
 
 ### Key Logic: Parallel Hashing (Performance)
 The ED2K hashing in `smartmule/hasher.py` uses a hybrid model:
 - **Sequential Reader**: Single-thread reads from disk to respect HDDs and `IOPRIO_VERYLOW`.
 - **Parallel Workers**: `ThreadPoolExecutor` handles MD4 chunk calculations.
 - **Backpressure**: The reader pauses if the thread pool buffer is full to prevent RAM exhaustion.
+
+### Key Logic: Database Concurrency (WAL Mode)
+SmartMule uses **SQLite Write-Ahead Logging (WAL)** to allow concurrent read and write operations.
+- **Benefit**: You can perform `--search` or `--stats` queries from the CLI while the background daemon is writing new records without encountering `database is locked` errors.
+- **Sync Mode**: Set to `NORMAL` for a balance between safety and performance.
+
+### Key Logic: Resource-Efficient Queue
+The `smartmule/queue_manager.py` uses a single worker thread and a **Deferred Cleanup** mechanism.
+- **No Thread Leaks**: Instead of spawning threads for delayed path release, it uses a timestamped queue (`collections.deque`) processed by the main worker.
+- **Priority**: Files are processed by size (Smallest first) to provide immediate feedback for small media.
+
+### Key Logic: I/O Resilience & SRP
+- **Centralized Deletion**: All physical file operations (purge/reprocess) must go through `LibraryOrganizer.purge_item`.
+- **Cross-Device Fallback**: The organizer detects `EXDEV` (cross-partition) errors and automatically falls back from `hardlink` to `copy` if necessary.
+- **Fast Watcher**: Directory inspection uses shallow `iterdir()` instead of recursive `rglob` to avoid blocking the OS event observer.
 
 ---
 

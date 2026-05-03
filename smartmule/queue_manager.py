@@ -14,6 +14,7 @@ Esto da la sensación de que SmartMule es rápido, porque los archivos pequeños
 import os
 import time
 import logging
+import collections
 from datetime import datetime
 import threading
 from queue import PriorityQueue
@@ -100,6 +101,10 @@ class QueueManager:
         # Conjunto de archivos que ya están en la cola o siendo procesados actualmente.
         # Lo uso para evitar duplicados si el Watcher y el Scan Inicial detectan lo mismo.
         self._active_paths: set[str] = set()
+
+        # Cola de limpieza diferida: (timestamp_expiracion, ruta_absoluta)
+        # Se usa para liberar rutas de 'active_paths' tras unos segundos sin crear hilos adicionales.
+        self._deferred_cleanup: collections.deque[tuple[float, str]] = collections.deque()
 
         # Abro la BBDD SQLite de caché con la ruta preconfigurada en config.py. 
         # Se crea automáticamente si no existe.
@@ -261,6 +266,16 @@ class QueueManager:
         # Mientras no se reciba la señal de parada, el Worker intentará sacar tareas de la cola.
         while not self._stop_event.is_set():
 
+            # --- LIMPIEZA DIFERIDA DE RUTAS ACTIVAS ---
+            # Procesamos la cola de limpieza para liberar rutas de archivos ya organizados.
+            # Esto evita crear hilos 'Timer' por cada archivo (eliminando thread leaks).
+            now = time.time()
+            with self._lock:
+                while self._deferred_cleanup and self._deferred_cleanup[0][0] <= now:
+                    _, path_to_release = self._deferred_cleanup.popleft()
+                    self._active_paths.discard(path_to_release)
+                    logger.debug(f"✓ Ruta liberada (GC): {Path(path_to_release).name}")
+
             try:
                 # Intento sacar una tarea de la cola con un timeout de 1 segundo.
                 task = self._queue.get(timeout=1.0)
@@ -295,20 +310,17 @@ class QueueManager:
 
             # Bloque finally: limpieza del estado
             finally: 
+
+                # Si la tarea no es None (es decir, que no es el centinela de parada)...
                 if task is not None:
+
                     # Obtenemos la ruta absoluta del archivo terminado
                     abs_path = str(Path(task.file_path).resolve())
 
-                    # NOTA: No eliminamos la ruta de 'active_paths' inmediatamente. 
-                    # Esperamos 5 segundos para ignorar los "ecos" que genera Windows al crear Hardlinks
-                    # o cambiar atributos justo después de mover/organizar el archivo.
-                    def _delayed_remove(p):
-                        with self._lock:
-                            self._active_paths.discard(p)
-                            logger.debug(f"✓ Ruta liberada del registro de activos: {Path(p).name}")
-
-                    import threading
-                    threading.Timer(5.0, _delayed_remove, [abs_path]).start()
+                    # Encolamos la ruta para ser liberada en 5 segundos. 
+                    # El Worker se encargará de ello en el siguiente ciclo sin crear nuevos hilos.
+                    with self._lock:
+                        self._deferred_cleanup.append((time.time() + 5.0, abs_path))
 
                 self._queue.task_done() # Marco la tarea como completada
 

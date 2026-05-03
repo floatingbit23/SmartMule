@@ -2,6 +2,7 @@ import os # Módulo para operaciones del sistema operativo
 import shutil # Módulo para operaciones con archivos y directorios
 import logging
 import re
+import errno
 
 from pathlib import Path
 from smartmule.config import LIBRARY_PATH, ORGANIZER_MODE
@@ -219,6 +220,29 @@ class LibraryOrganizer:
         
         return str(dest_path) # Retorno el path del archivo organizado.
 
+    # Función auxiliar para purgar (eliminar físicamente) un archivo/directorio.
+    def purge_item(self, file_path: Path, label: str) -> bool:
+
+        """
+        Retorna True si se borró correctamente o si ya no existía.
+        """
+        
+        if file_path.exists():
+            try:
+                if file_path.is_dir():
+                    shutil.rmtree(file_path)
+                else:
+                    os.remove(file_path)
+                print(f"  [-] Eliminado de {label}: {file_path.name}")
+                return True
+            except Exception as e:
+                msg = f"  [!] No se pudo borrar en {label}: {e}"
+                if "[WinError 5]" in str(e) or "[WinError 32]" in str(e):
+                    msg += " (¿El archivo está abierto (Seeding) en uTorrent/eMule?)"
+                print(msg)
+                return False
+        return True
+
     # Función para transferir el archivo o directorio
     def _transfer_item(self, src: Path, dest: Path) -> None:
 
@@ -293,9 +317,15 @@ class LibraryOrganizer:
 
         except OSError as e:
 
-            # Fallback silencioso a copia si falla el hardlink (ej: intento entre particiones distintas C: y D:)
-            logger.warning(f"[WARN]  No se pudo crear hardlink ({e}). Reintentando mediante copia física...")
-            self._transfer_item_as_copy(src, dest) # Fallback a copia
+            # Solo hacemos fallback a copia si el error es 'Invalid cross-device link' (EXDEV)
+            if e.errno == errno.EXDEV:
+                logger.warning("[WARN]  Intento de hardlink entre particiones distintas. Reintentando mediante copia física...")
+                self._transfer_item_as_copy(src, dest) # Fallback a copia
+            
+            else:
+                # Si falla por otra razón (ej. disco lleno), abortamos para evitar corrupción o saturación
+                logger.error(f"[ERR] Fallo crítico del Sistema de Archivos al crear el hardlink: {e}")
+                raise
 
 
     # Función auxiliar booleana para verificar si dos rutas pertenecen al mismo dispositivo físico/partición

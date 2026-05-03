@@ -240,40 +240,6 @@ def _parse_user_selection(choice: str, results_len: int) -> list[int]:
                 
     return sorted(set(indices))
 
-# Función auxiliar para borrar archivos físicamente. Retorna True si se borró o no existía.
-def _delete_physical_file(file_path: Path, label: str) -> bool:
-
-    # Comprobamos si el archivo existe
-    if file_path.exists():
-
-        try:
-
-            # Si el archivo existe, lo eliminamos
-            if file_path.is_dir():
-                shutil.rmtree(file_path)
-
-            else:
-                os.remove(file_path)
-
-            print(f"  [-] Eliminado de {label}: {file_path.name}")
-
-        except Exception as e:
-            msg = f"  [!] No se pudo borrar en {label}: {e}"
-
-            # Detecta si el error es por bloqueo de archivo
-            if "[WinError 5]" in str(e) or "[WinError 32]" in str(e):
-                msg += " (¿El archivo está abierto (Seeding) en uTorrent/eMule?)"
-            print(msg)
-            return False
-
-        return True
-
-    # Si el archivo no existe, saltamos el proceso
-    else:
-        # print(f" [i] El archivo ya no existe en {label} (saltando...)")
-        return True
-
-
 # Función que procesa las eliminaciones de archivos
 def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> None:
 
@@ -300,6 +266,9 @@ def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> 
         print(f"[!] Iniciando borrado automatico de {len(to_delete)} archivos...")
 
 
+    from smartmule.organizer import LibraryOrganizer
+    organizer = LibraryOrganizer()
+
     # Bucle que procesa cada archivo seleccionado
     for i, item in enumerate(to_delete, 1):
 
@@ -309,12 +278,12 @@ def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> 
         print(f"\n[{i}/{len(to_delete)}] Procesando: {file_name}")
 
         # 1. Intentamos borrar origen
-        ok_inc = _delete_physical_file(Path(item['file_path']), "Incoming")
+        ok_inc = organizer.purge_item(Path(item['file_path']), "Incoming")
         
         # 2. Intentamos borrar en biblioteca
         ok_lib = True
         if item.get('final_path'):
-            ok_lib = _delete_physical_file(Path(item['final_path']), "Library")
+            ok_lib = organizer.purge_item(Path(item['final_path']), "Library")
 
         # 3. Solo borramos de la BBDD si pudimos borrar previamente de disco (o si ya no existía el archivo)
         if ok_inc and ok_lib:
@@ -535,7 +504,9 @@ def reprocess_files(query: str, select_all: bool = False) -> None:
             physical_ok = True
 
             if lib_path:
-                physical_ok = _delete_physical_file(Path(lib_path), "Library")
+                from smartmule.organizer import LibraryOrganizer
+                organizer = LibraryOrganizer()
+                physical_ok = organizer.purge_item(Path(lib_path), "Library")
             
             if not physical_ok:
                 logger.warning(f"[REPROCESS] Registro eliminado, pero el archivo en Library sigue bloqueado: {clean_name}")

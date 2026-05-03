@@ -54,7 +54,7 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
 
 *   **Privacidad**: Compatible con modelos locales (LM Studio) para procesar nombres sin subirlos a la nube.
 
-*  **Gasto de recursos muy bajo**: SmartMule está diseñado para ejecutarse en segundo plano sin interferir con el uso normal del PC. Establece una prioridad de I/O (`IOPRIO_VERYLOW`) y CPU (`IDLE_PRIORITY_CLASS`) mínimas.
+*  **Gasto de recursos muy bajo**: SmartMule está diseñado para ejecutarse en segundo plano sin interferir con el uso normal del PC. Establece una prioridad de I/O (`IOPRIO_VERYLOW`) y CPU (`IDLE_PRIORITY_CLASS`) mínimas. Además, utiliza el modo **SQLite WAL** para permitir búsquedas instantáneas incluso mientras el motor está organizando archivos pesados.
 
 ---
 
