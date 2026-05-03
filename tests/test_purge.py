@@ -34,8 +34,8 @@ def mock_files(tmp_path):
 def test_search_by_name_literal(temp_db):
     """Prueba la búsqueda literal simple."""
     temp_db._conn.execute(
-        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ("path/to/Matrix.mkv", "Matrix.mkv", 100, "hash1", "link1", "2026-01-01")
+        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at, duration) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("path/to/Matrix.mkv", "Matrix.mkv", 100, "hash1", "link1", "2026-01-01", 0)
     )
     
     results = temp_db.search_by_name("Matrix")
@@ -45,8 +45,8 @@ def test_search_by_name_literal(temp_db):
 def test_search_by_wildcard(temp_db):
     """Prueba la búsqueda con comodines (*) estilo shell."""
     temp_db._conn.execute(
-        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ("path/to/Netfly.ps1", "Netfly.ps1", 100, "hash2", "link2", "2026-01-01")
+        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at, duration) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("path/to/Netfly.ps1", "Netfly.ps1", 100, "hash2", "link2", "2026-01-01", 0)
     )
     
     # Caso 1: Empieza por N
@@ -64,8 +64,8 @@ def test_search_by_wildcard(temp_db):
 def test_search_by_regex(temp_db):
     """Prueba la búsqueda usando expresiones regulares puras."""
     temp_db._conn.execute(
-        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ("path/to/Foto_2024.jpg", "Foto_2024.jpg", 100, "hash3", "link3", "2026-01-01")
+        "INSERT INTO files (file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at, duration) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("path/to/Foto_2024.jpg", "Foto_2024.jpg", 100, "hash3", "link3", "2026-01-01", 0)
     )
     
     # Buscar archivos que contengan números
@@ -76,8 +76,8 @@ def test_search_by_regex(temp_db):
 def test_delete_record(temp_db):
     """Prueba que el borrado de la base de datos funciona."""
     temp_db._conn.execute(
-        "INSERT INTO files (id, file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (99, "path", "name", 10, "h", "l", "t")
+        "INSERT INTO files (id, file_path, file_name, file_size, ed2k_hash, ed2k_link, processed_at, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (99, "path", "name", 10, "h", "l", "t", 0)
     )
     
     temp_db.delete_by_id(99)

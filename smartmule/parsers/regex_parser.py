@@ -33,14 +33,14 @@ LANGUAGE_MAP = {
 SCENE_TAGS = [
     # Calidades y Formatos
     r"hdrip", r"web-?dl", r"web-?rip", r"bluray", r"brrip", r"bdrip", r"dvdrip", r"dvd-?scr",
-    r"remux", r"hybrid", r"bdmux", r"telesync", r"ts", r"cam", r"hdcam", r"hdts", r"hdtv",
+    r"remux", r"hybrid", r"bdmux", r"telesync", r"ts", r"cam", r"hdcam", r"hd-?ts", r"hdtv",
     r"proper", r"repack", r"rerip", r"internal", r"remaster(ed)?", r"v-?a", r"no-?ads?", r"uncut", r"unrated", r"uncensored",
     r"imax", r"criterion", r"anniversary", r"extended", r"directors?.?cut", r"special.?edition",
     r"theatrical", r"3d", r"sbs", r"half-?ou", r"half-?sbs", r"open.?matte", r"cc", r"v\.?o\.?s\.?",
     
     # Códecs y Tecnología
     r"x264", r"x265", r"x266", r"hevc", r"h264", r"h265", r"h266", r"xvid", r"divx",
-    r"aac", r"ac3", r"e-ac3", r"dts", r"dts-?hd", r"truehd", r"atmos", r"8ch", r"6ch",
+    r"aac\d*", r"ac3", r"e-ac3", r"dts", r"dts-?hd", r"truehd", r"atmos", r"8ch", r"6ch",
     r"10bit", r"hi10p", r"hdr", r"hdr10", r"dolby.?vision", r"dv", r"dovi", r"hlg", r"pq", r"sdr",
     
     # Resoluciones
@@ -67,7 +67,7 @@ SCENE_TAGS = [
     
     # Metadatos de Audio/Tech adicionales
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
-    r"h\s*264", r"h\s*265", r"5\s*1", r"7\s*1", r"runneo", r"ddp", r"dd\+"
+    r"h\s*26[4-6]", r"x\s*26[4-6]", r"5\s*1", r"7\s*1", r"runneo", r"ddp?", r"dd\+", r"dovi", r"hdr\s*10"
 ]
 
 # hdrip = High Definition Rip
@@ -163,18 +163,12 @@ def parse_filename(filename: str) -> dict:
     # === REGEX ===
 
     # 1. Limpieza de dominios web (Buscamos esto ANTES de quitar los puntos)
-    # ej: Pelicula.com -> Pelicula
-    clean_name = re.sub(r'(?i)\b\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)\b', ' ', base_name)
+    # ej: www.Pelicula.com -> Pelicula
+    clean_name = re.sub(r'(?i)\b(?:www\.)?\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)\b', ' ', base_name)
 
     # 2. Sustitución de separadores comunes por espacios.
     clean_name = re.sub(r'[\._]', ' ', clean_name)
-    
-    # === NORMALIZACIÓN INICIAL ===
-    # Separar números de letras (ej: h265Español -> h265 Español)
-    # Esto es CRÍTICO para que las regex posteriores (\b) funcionen con tags pegados.
-    clean_name = re.sub(r'([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])(\d)', r'\1 \2', clean_name)
-    clean_name = re.sub(r'(\d)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])', r'\1 \2', clean_name)
-    
+
     # Extraer año (Buscamos 19xx o 20xx)
     year_match = re.search(r'\b(19\d{2}|20\d{2})\b', clean_name)
 
@@ -211,10 +205,15 @@ def parse_filename(filename: str) -> dict:
     for tag in SCENE_TAGS:
         clean_name = re.sub(r'(?i)\b' + tag + r'\b', ' ', clean_name)
 
+    # 4. Separación de letras y números (ej: Pelicula2019 -> Pelicula 2019)
+    # Lo hacemos después de las etiquetas para que cosas como 1080p se borren íntegras
+    clean_name = re.sub(r'([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])(\d)', r'\1 \2', clean_name)
+    clean_name = re.sub(r'(\d)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])', r'\1 \2', clean_name)
+
     # Eliminar la firma del uploader (como "by mDudikoff" o "-GrpName")
     clean_name = re.sub(r'(?i)\bby\s+[\w]+\b', '', clean_name)
     # Mejorada para capturar grupos al final (ej: -GETB8 o -GETB 8) sin romper títulos con guion
-    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+(\s*\d{1,2})?$', '', clean_name)
+    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+(\s*\d{1,4})?$', '', clean_name)
     
     # Limpiar prefijos inútiles al inicio (ej: FILM -, __, [DIVE - ITA])
     clean_name = re.sub(r'(?i)^(film|video|movie|audio|documentary)\s*-\s*', '', clean_name)
@@ -318,8 +317,8 @@ def parse_filename(filename: str) -> dict:
     
     # Quitar códecs con puntos o espacios (ej: H.264, DD5.1, DD5 1)
     codec_list = [
-        r"[hx][.\s]?26[45]", r"dd[.\s]?5[.\s]?1",
-        r"ac3", r"dts", r"aac", r"av1", r"xvid", r"ld-aac"
+        r"[hx][.\s]?26[456]", r"dd[.\s]?5[.\s]?1", r"dd[.\s]?plus",
+        r"ac3", r"dts", r"aac\d*", r"av1", r"xvid", r"ld-aac"
     ]
     codec_pattern = r'(?i)\b(' + '|'.join(codec_list) + r')\b'
     clean_name = re.sub(codec_pattern, ' ', clean_name)
@@ -384,11 +383,17 @@ def parse_filename(filename: str) -> dict:
     # Solo confiamos si tenemos año/temporada Y el título está MUY limpio
     if (result["year"] or result["season"]):
 
-        # Penalizamos si quedan guiones huérfanos, caracteres raros o el título es muy corto
+        # Penalizamos si quedan guiones huérfanos, caracteres raros, etiquetas de audio (DD) o números residuales
         has_noise = re.search(r'[+&/]', clean_name)
+        # Si quedan etiquetas como "DD" o "SM" que son ruido típico
+        has_tag_noise = re.search(r'(?i)\b(dd|sm|atmos|dovi|hdr|ts|tc|cam|rip)\b', clean_name)
+        
+        # Si quedan números sospechosos al final (más de 2 dígitos que no son el año)
+        # O si queda un SOLO dígito al final tras un guion o espacio (típico residuo de 5.1 o similar)
+        has_residual_numbers = re.search(r'\s\d{2,}\s*$', clean_name) or re.search(r'[\s-]\d\s*$', clean_name)
 
         # Si el título termina en guion o tiene guiones vacios, bajamos confianza
-        is_clean = not has_noise and "." not in clean_name and " - -" not in clean_name
+        is_clean = not has_noise and not has_tag_noise and not has_residual_numbers and "." not in clean_name and " - -" not in clean_name
         
         if len(clean_name) > 5 and is_clean:
             result["confidence"] = "high"

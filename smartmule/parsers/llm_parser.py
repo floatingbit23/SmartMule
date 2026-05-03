@@ -20,11 +20,11 @@ Reglas:
 3. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
 4. Detecta "season" y "episode" si es una serie. Usa números enteros.
 5. Identifica "year" si existe. Usa número entero.
-6. "media_type" debe ser exactamente uno de los siguientes strings: "video", "tv series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
+6. "media_type" debe ser exactamente uno de los siguientes strings: "video", "series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
 7. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
 
 Ejemplo 1: "The.Office.S03E05.1080p.HEVC.x265.mkv"
-{"title": "The Office", "media_type": "tv series", "season": 3, "episode": 5, "quality": "1080p", "year": null}
+{"title": "The Office", "media_type": "series", "season": 3, "episode": 5, "quality": "1080p", "year": null}
 
 Ejemplo 2: "Age_of_Empires_II_Definitive_Edition-ISO-2019.rar"
 {"title": "Age of Empires II Definitive Edition", "media_type": "games", "season": null, "episode": null, "quality": null, "year": 2019}

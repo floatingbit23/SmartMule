@@ -19,10 +19,12 @@ def db(tmp_path):
     ]
     
     for path, name, title, mtype, score in test_data:
+        # Añadimos una duración de prueba (120 min = 7200 seg) solo para películas
+        duration = 7200 if mtype == "movie" else 0
         db._conn.execute(
-            """INSERT INTO files (file_path, file_name, official_title, media_type, score, file_size, ed2k_hash, ed2k_link, processed_at) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (path, name, title, mtype, score, 100, f"hash_{name}", f"link_{name}", "2026-01-01 10:00:00")
+            """INSERT INTO files (file_path, file_name, official_title, media_type, score, file_size, ed2k_hash, ed2k_link, processed_at, duration) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (path, name, title, mtype, score, 100, f"hash_{name}", f"link_{name}", "2026-01-01 10:00:00", duration)
         )
     
     # Forzamos sincronización inicial de FTS5 (en el constructor ya se hace si está vacía, 

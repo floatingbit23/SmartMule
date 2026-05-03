@@ -68,8 +68,10 @@ class MetadataEngine:
         data = self._apply_regex_and_ai(filename)
 
         titulo_limpio = data.get("title", "")
-        media_type = data.get("media_type", "unknown")
-        logger.info(f"[OK] Nombre limpio: '{titulo_limpio}' ({media_type})")
+        orig_media = data.get("media_type", "unknown")
+        orig_year = data.get("year")
+        
+        logger.info(f"[OK] Nombre limpio: '{titulo_limpio}' ({orig_media})")
 
         # ================= CAPA 2.5: Antimalware Semántico (Contenedores) =================
         if self._inspect_compressed(data, filename, technical_target):
@@ -78,7 +80,7 @@ class MetadataEngine:
         # ================= CAPA 2.7: Inspección Técnica (FFmpeg) =================
 
         # Solo para video, para permitir el desempate (Tie-Breaking) por duración.
-        if media_type in ["video", "movie", "tv series"] and technical_target:
+        if orig_media in ["video", "movie", "series"] and technical_target:
             tech_data = inspect_media_file(technical_target)
             if tech_data.get("is_media"):
                 data["technical"] = tech_data
@@ -91,6 +93,27 @@ class MetadataEngine:
 
         # ================= CAPA 3: APIs Oficiales y Triaje VT =================
         self._enrich_with_apis(data, filename, technical_target)
+
+        # ================= CAPA 4: Fallback Plan C (Usar IA si las APIs fallaron) =================
+
+        # Si las APIs no devolvieron nada pero NO se usó la IA (porque Regex arrojó "high confidence"),
+        # entonces le damos una última oportunidad a la IA para corregir el posible falso positivo del regex.
+        if not data.get("api_data") and not data.get("_ai_used"):
+
+            # Solo para tipos de medios que dependen de APIs (películas, series, libros, audio)
+            if data.get("media_type") in ["video", "movie", "series", "book", "audio", "unknown"]:
+                
+                logger.info(f"[PLAN C] APIs sin resultados para '{titulo_limpio}'. Invocando IA como refuerzo...")
+                data = self._apply_ai_layer(filename, data)
+                
+                # Si la IA nos ha dado datos distintos, reintentamos búsqueda en APIs
+                if (data.get("title") != titulo_limpio or 
+                    data.get("media_type") != orig_media or 
+                    data.get("year") != orig_year):
+
+                    logger.info("[RETRY] Reintentando búsqueda con datos corregidos por IA...")
+                    self._enrich_with_apis(data, filename, technical_target)
+
         self._log_metadata_card(data)
 
         # Guardamos en caché
@@ -140,34 +163,45 @@ class MetadataEngine:
     def _apply_regex_and_ai(self, filename: str) -> dict:
 
         data = parse_filename(filename)
+        data["_ai_used"] = False
         
         # Si el análisis de Regex es de baja confianza, se aplica el análisis de IA.
         if data.get("confidence") == "low":
-            context_data = {
-                "languages": data.get("languages"),
-                "subtitles": data.get("subtitles")
-            }
-
-            ai_data = parse_with_llm(filename, context=context_data)
+            data = self._apply_ai_layer(filename, data)
             
-            # Si el análisis de IA es exitoso, se actualizan los valores
-            if ai_data.get("confidence") != "failed":
-
-                ai_data["extension"] = data.get("extension")
-                ai_data["resolution"] = data.get("resolution", "")
-                ai_data["languages"] = data.get("languages", "")
-                ai_data["subtitles"] = data.get("subtitles", "")
-                
-                # Si el tipo de medio es desconocido, se usa el tipo de medio que asignó Regex
-                if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
-                    ai_data["media_type"] = data.get("media_type")
-                    
-                data = ai_data
-
-            else:
-                logger.warning("[ERROR] Análisis por IA falló. Volviendo al resultado de Regex...")
-
         return data
+
+    # Función que aplica el análisis de IA.
+    def _apply_ai_layer(self, filename: str, data: dict) -> dict:
+
+        """Aplica la capa de inteligencia artificial para limpieza semántica."""
+
+        logger.info("[AI] Iniciando análisis semántico con LLM...")
+        
+        context_data = {
+            "languages": data.get("languages"),
+            "subtitles": data.get("subtitles")
+        }
+
+        ai_data = parse_with_llm(filename, context=context_data)
+        
+        # Si el análisis de IA es exitoso, se actualizan los valores
+        if ai_data.get("confidence") != "failed":
+
+            ai_data["extension"] = data.get("extension")
+            ai_data["resolution"] = data.get("resolution", "")
+            ai_data["languages"] = data.get("languages", "")
+            ai_data["subtitles"] = data.get("subtitles", "")
+            
+            # Si el tipo de medio es desconocido, se usa el tipo de medio que asignó Regex
+            if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
+                ai_data["media_type"] = data.get("media_type")
+                
+            ai_data["_ai_used"] = True
+            return ai_data
+        else:
+            logger.warning("[ERROR] Análisis por IA falló. Volviendo al resultado de Regex...")
+            return data
 
 
     # Función que inspecciona archivos comprimidos.
@@ -230,7 +264,7 @@ class MetadataEngine:
         media_type = data.get("media_type", "unknown")
         year = data.get("year")
 
-        if media_type in ["video", "tv series", "movie"]: 
+        if media_type in ["video", "series", "movie"]: 
             self._query_tmdb(data, titulo_limpio, year)
 
         elif media_type == "book":
@@ -353,9 +387,9 @@ class MetadataEngine:
             poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
             
             # --- MEJORA: Actualizamos el tipo de medio oficial ---
-            # Si venía como 'video' genérico pero TMDB lo ha encontrado, lo promovemos a su tipo real (movie/tv series)
+            # Si venía como 'video' genérico pero TMDB lo ha encontrado, lo promovemos a su tipo real (movie/series)
             if data.get("season"):
-                data["media_type"] = "tv series"
+                data["media_type"] = "series"
             else:
                 data["media_type"] = "movie"
 
@@ -566,6 +600,13 @@ class MetadataEngine:
 
             if ad.get("score"):
                 logger.info(f"    - Relevancia/Nota: {ad['score']}")
+            
+            # Información técnica complementaria (FFmpeg)
+            # Duración en minutos
+            tech = data.get("technical")
+            if tech and tech.get("duration_sec"):
+                mins = tech["duration_sec"] // 60
+                logger.info(f"    - Duración: {mins} min")
             
             if ad.get("veredicto"):
                 logger.info(f"    - Seguridad: {ad['veredicto']}")

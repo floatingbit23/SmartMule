@@ -183,7 +183,7 @@ Once the alias is configured, you will be able to use from any terminal:
 *   `smartmule --reprocess "Name"` (Force file re-analysis)
 *   `smartmule --debug` (Start with detailed AI logs)
 *   `smartmule --pid`  (Shows the active process PID)
-*   `smartmule --search "Name"` (Search files)
+*   `smartmule --search [query]` (Search files)
 
 ---
 

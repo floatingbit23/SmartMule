@@ -22,6 +22,7 @@ Arquitectura (orden de ejecución):
 
 import sys # Interacción con el intérprete
 import os  # Operaciones de sistema
+import shutil # Operaciones con archivos y directorios
 import signal # Captura de señales (Ctrl+C, apagado de sistema)
 import psutil # Monitorización avanzada de procesos y recursos
 import logging 
@@ -239,8 +240,8 @@ def _parse_user_selection(choice: str, results_len: int) -> list[int]:
                 
     return sorted(set(indices))
 
-# Función auxiliar para borrar archivos físicamente
-def _delete_physical_file(file_path: Path, label: str) -> None:
+# Función auxiliar para borrar archivos físicamente. Retorna True si se borró o no existía.
+def _delete_physical_file(file_path: Path, label: str) -> bool:
 
     # Comprobamos si el archivo existe
     if file_path.exists():
@@ -249,7 +250,6 @@ def _delete_physical_file(file_path: Path, label: str) -> None:
 
             # Si el archivo existe, lo eliminamos
             if file_path.is_dir():
-                import shutil
                 shutil.rmtree(file_path)
 
             else:
@@ -258,11 +258,20 @@ def _delete_physical_file(file_path: Path, label: str) -> None:
             print(f"  [-] Eliminado de {label}: {file_path.name}")
 
         except Exception as e:
-            print(f"  [!] Error borrando origen {file_path.name}: {e}")
+            msg = f"  [!] No se pudo borrar en {label}: {e}"
+
+            # Detecta si el error es por bloqueo de archivo
+            if "[WinError 5]" in str(e) or "[WinError 32]" in str(e):
+                msg += " (¿El archivo está abierto (Seeding) en uTorrent/eMule?)"
+            print(msg)
+            return False
+
+        return True
 
     # Si el archivo no existe, saltamos el proceso
     else:
-        print(f" [i] El archivo ya no existe en {label} (saltando...)")
+        # print(f" [i] El archivo ya no existe en {label} (saltando...)")
+        return True
 
 
 # Función que procesa las eliminaciones de archivos
@@ -299,16 +308,20 @@ def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> 
 
         print(f"\n[{i}/{len(to_delete)}] Procesando: {file_name}")
 
-        # Eliminamos el archivo de la carpeta de origen (Incoming)
-        _delete_physical_file(Path(item['file_path']), "Incoming")
+        # 1. Intentamos borrar origen
+        ok_inc = _delete_physical_file(Path(item['file_path']), "Incoming")
         
-        # Si el archivo tiene una ruta final (la ruta de SmartMule), la eliminamos tambien
-        if item['final_path']:
-            _delete_physical_file(Path(item['final_path']), "Library")
+        # 2. Intentamos borrar en biblioteca
+        ok_lib = True
+        if item.get('final_path'):
+            ok_lib = _delete_physical_file(Path(item['final_path']), "Library")
 
-        # Finalmente eliminamos el registro de la base de datos
-        db.delete_by_id(item['id'])
-        print(" [OK] Registro eliminado de la base de datos.")
+        # 3. Solo borramos de la BBDD si pudimos borrar previamente de disco (o si ya no existía el archivo)
+        if ok_inc and ok_lib:
+            db.delete_by_ed2k(item['ed2k_hash'])
+            print("  [OK] Registro eliminado de la base de datos.")
+        else:
+            print("  [!] El registro se mantiene en la base de datos para evitar inconsistencias.")
 
     print("\n [DONE] ¡Purga completada con éxito!\n")
 
@@ -333,7 +346,7 @@ def search_files(query: str) -> None:
             if not query:
                 print("\n[i] No tienes archivos registrados en la base de datos de SmartMule!\n")
             else:
-                print(f"\n[!] No se encontraron archivos que coincidan con '{query}'.\n")
+                print("\n[!] No se encontraron archivos que cumplan esos criterios.\n")
             return
 
         print(f"\n[OK] Se han encontrado {len(results)} coincidencia(s):\n")
@@ -348,10 +361,10 @@ def search_files(query: str) -> None:
 
             media_type = item.get('media_type', 'unknown').upper()
             
-            # Mostramos la resolución solo para los tipos de vídeo ("MOVIE", "TV SERIES", "VIDEO")
+            # Mostramos la resolución solo para los tipos de vídeo ("MOVIE", "SERIES", "VIDEO")
             res = item.get('resolution')
 
-            if media_type in ["MOVIE", "TV SERIES", "VIDEO"] and res:
+            if media_type in ["MOVIE", "SERIES", "VIDEO"] and res:
                 media_type = f"{media_type} ({res})"
 
             title = item.get('official_title') or item.get('file_name', 'Unknown')
@@ -519,14 +532,14 @@ def reprocess_files(query: str, select_all: bool = False) -> None:
             db.delete_by_ed2k(ed2k)
             
             # 2. Eliminar el archivo en Library si existe (rompemos el Hard Link)
+            physical_ok = True
+
             if lib_path:
-                lp = Path(lib_path)
-                if lp.exists():
-                    try:
-                        lp.unlink()
-                        print("    [OK] Hardlink eliminado en Library.")
-                    except Exception as e:
-                        print(f"    [WARN] No se pudo borrar en Library: {e}")
+                physical_ok = _delete_physical_file(Path(lib_path), "Library")
+            
+            if not physical_ok:
+                logger.warning(f"[REPROCESS] Registro eliminado, pero el archivo en Library sigue bloqueado: {clean_name}")
+                print("  [!] Nota: El registro se borró, pero no se pudo eliminar el archivo físico de la Library (posiblemente esté en uso / Seeding).")
 
 
         print(f"\n✅ {len(to_reprocess)} archivos invalidados correctamente.")
@@ -557,7 +570,7 @@ def show_stats() -> None:
         CATEGORY_ICONS = {
             "movie": "🎬",
             "video": "🎥",
-            "tv series": "📺",
+            "series": "📺",
             "audio": "🎵",
             "book": "📚",
             "document": "📄",
@@ -658,7 +671,6 @@ def show_status() -> None:
     Muestra un estado detallado del servicio y herramientas de SmartMule.
     """
 
-    import shutil
     import subprocess
     from smartmule import config
     

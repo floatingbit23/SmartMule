@@ -68,7 +68,8 @@ class HashDatabase:
             security_verdict TEXT DEFAULT '', -- Veredicto de seguridad
             vt_url TEXT DEFAULT '', -- URL del informe de VirusTotal
             final_path TEXT DEFAULT '', -- Ruta final del archivo
-            is_organized INTEGER DEFAULT 0 -- Por defecto: no organizado=0, organizado=1 
+            is_organized INTEGER DEFAULT 0, -- Por defecto: no organizado=0, organizado=1 
+            duration INTEGER DEFAULT 0 -- Duración en segundos (extraída por FFmpeg)
         );
     """
 
@@ -140,7 +141,8 @@ class HashDatabase:
         "ALTER TABLE files ADD COLUMN security_verdict TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN vt_url TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN final_path TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN is_organized INTEGER DEFAULT 0;"
+        "ALTER TABLE files ADD COLUMN is_organized INTEGER DEFAULT 0;",
+        "ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;"
     ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
@@ -441,10 +443,18 @@ class HashDatabase:
                 
             return (None, None, None, None)
 
+        # Handler para veredictos: 'verdict:safe' incluye multimedia por defecto
+        def verdict_handler(m):
+            val = m.group(1).lower()
+            if val == "safe":
+                # Lógica: (f.security_verdict = 'SAFE' OR (f.security_verdict = '' AND f.media_type IN ('movie', 'series', 'video', 'audio', 'image', 'book', 'document')))
+                return ("security_verdict", "= 'SAFE' OR (f.security_verdict = '' AND f.media_type IN ('movie', 'series', 'video', 'audio', 'image', 'book', 'document'))", "", True)
+            return ("security_verdict", "LIKE ?", f"{val.upper()}%", False)
+
         filter_patterns = {
             r"type:(\S+)":       lambda m: ("media_type", "LIKE ?", f"{m.group(1).lower()}%", False),
             r"score([><=]+)([\d.]+)": lambda m: ("score", f"{m.group(1)} ?", float(m.group(2)), False),
-            r"verdict:(\S+)":    lambda m: ("security_verdict", "LIKE ?", f"{m.group(1).upper()}%", False),
+            r"verdict:(\S+)":    verdict_handler,
             r"res:(\S+)":        lambda m: ("resolution", "LIKE ?", f"{m.group(1)}%", False),
             r"organized:(\S+)":  organized_handler,
             r"added:(\d+d|today)": date_handler,
@@ -710,15 +720,18 @@ class HashDatabase:
         # Estado del organizador
         is_organized = 1 if final_path else 0
 
+        # Duración (técnica)
+        duration = metadata.get("technical", {}).get("duration_sec", 0)
+
         self._conn.execute(
             """
             UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
-             resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, fingerprint, file_size)
+             resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, fingerprint, file_size)
         )
 
         self._conn.commit()

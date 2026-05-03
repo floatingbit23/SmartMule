@@ -41,7 +41,7 @@ def organizer_folders(tmp_path):
 
 def test_hardlink_simple_file(organizer_folders):
     """Verifica que un archivo individual se vincule correctamente sin borrarse del origen."""
-    incoming, library = organizer_folders
+    incoming, _ = organizer_folders
     file_src = incoming / "movie.mkv"
     file_src.write_text("contenido del video")
     
@@ -71,7 +71,7 @@ def test_hardlink_simple_file(organizer_folders):
 
 def test_hardlink_recursive_dir(organizer_folders):
     """Verifica que un directorio de release se recree con hardlinks internos."""
-    incoming, library = organizer_folders
+    incoming, _ = organizer_folders
     release_dir = incoming / "Season_01"
     release_dir.mkdir()
     file1 = release_dir / "ep01.mkv"
@@ -83,7 +83,7 @@ def test_hardlink_recursive_dir(organizer_folders):
     
     organizer = LibraryOrganizer()
     metadata = {
-        "media_type": "tv series",
+        "media_type": "series",
         "title": "Series Test",
         "api_data": {"veredicto": "SAFE"}
     }
@@ -105,7 +105,7 @@ def test_hardlink_recursive_dir(organizer_folders):
 
 def test_fallback_to_copy_on_cross_device(organizer_folders):
     """Verifica que si falla el hardlink (OSError EXDEV), se use copia tradicional."""
-    incoming, library = organizer_folders
+    incoming, _ = organizer_folders
     file_src = incoming / "cross_disk.mkv"
     file_src.write_text("big movie file")
     
@@ -129,7 +129,7 @@ def test_fallback_to_copy_on_cross_device(organizer_folders):
 
 def test_malicious_deletion_no_link(organizer_folders):
     """Verifica que el malware se borre del tirón en lugar de linkearse."""
-    incoming, library = organizer_folders
+    incoming, _ = organizer_folders
     virus = incoming / "malware.exe"
     virus.write_text("soy un virus")
     

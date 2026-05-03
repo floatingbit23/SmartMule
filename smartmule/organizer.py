@@ -127,7 +127,7 @@ class LibraryOrganizer:
 
         category_mapping = {
             "movie": "Movies_and_Series",
-            "tv series": "Movies_and_Series",
+            "series": "Movies_and_Series",
             "video": "Video_Clips",
             "book": "Books_and_Comics",
             "audio": "Audio_and_Music",
@@ -215,7 +215,7 @@ class LibraryOrganizer:
         
         # Formateo el nombre de la categoría para la notificación.
         cat_name = folder_name.replace("_and_", " y ").replace("_", " ")
-        send_notification("Descarga Organizada [OK]", f"{emoji} {filename} se ha guardado en tu biblioteca de {cat_name}.")
+        send_notification("Descarga Organizada [OK]", f"{emoji} {final_filename} se ha guardado en tu biblioteca de {cat_name}.")
         
         return str(dest_path) # Retorno el path del archivo organizado.
 

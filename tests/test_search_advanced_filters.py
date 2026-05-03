@@ -55,13 +55,13 @@ def db_advanced(tmp_path):
             """INSERT INTO files (
                 file_path, file_name, official_title, media_type, score, 
                 resolution, security_verdict, is_organized, file_size, 
-                ed2k_hash, ed2k_link, processed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ed2k_hash, ed2k_link, processed_at, duration
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 f"path/{item['file_name']}", item['file_name'], item['official_title'], 
                 item['media_type'], item['score'], item['resolution'], 
                 item['verdict'], item['organized'], 1024, 
-                f"hash_{item['file_name']}", f"link_{item['file_name']}", now
+                f"hash_{item['file_name']}", f"link_{item['file_name']}", now, 0
             )
         )
     
