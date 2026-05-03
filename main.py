@@ -84,37 +84,47 @@ def remove_pid():
             pass
 
 def stop_daemon():
+
     """
-    Busca la instancia activa de SmartMule y le envía una señal de terminación.
+    Busca la instancia activa de SmartMule (su PID) y le envía una señal de terminación.
     Permite detener el servicio invisible de forma segura desde la consola.
     """
+
     pid = get_active_pid()
+
     if not pid:
-        print("ℹ️  SmartMule no está corriendo en segundo plano.")
+        print("[WARN] SmartMule no está corriendo en segundo plano.")
         return
-        
-    print(f"🛑 Deteniendo SmartMule (PID: {pid})...")
+
+    print(f"[INFO] Deteniendo SmartMule (PID: {pid})...")
+
     try:
         p = psutil.Process(pid)
         p.terminate() # Envía SIGTERM (permite guardado de datos y cierre limpio)
         p.wait(timeout=5) # Esperamos a que el proceso termine
-        print("✅  SmartMule se ha detenido limpiamente.")
+        print("[OK] SmartMule se ha detenido limpiamente.")
+
     except psutil.NoSuchProcess:
-        print("ℹ️  El proceso ya no existe.")
+        print("[WARN] El proceso ya no existe.")
+
     except psutil.TimeoutExpired:
-        print("⚠️  El proceso está tardando en cerrar. Forzando cierre (kill)...")
+        print("[WARN] El proceso está tardando en cerrar. Forzando cierre (kill)...")
         p.kill() # Cierre forzoso si no responde al terminate
+
     except Exception as e:
         print(f"❌  Error al detener SmartMule: {e}")
+
     finally:
-        remove_pid()
+        remove_pid() # Limpia el archivo PID
 
 def setup_io_priority() -> None:
+
     """
     Configura el proceso para que sea 'invisible':
     1. Prioridad de I/O mínima (para no ralentizar el disco).
     2. Prioridad de CPU mínima (para no ralentizar otras aplicaciones).
     """
+
     try:
         process = psutil.Process(os.getpid())
         
@@ -167,6 +177,7 @@ def _check_destruction_protocol(query: str, select_all: bool, no_preserve: bool)
         return True, ""
 
     return True, search_term
+
 
 # Función que muestra los resultados de la búsqueda.
 def _display_candidates(results: list, no_preserve: bool) -> None:
@@ -302,6 +313,70 @@ def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> 
     print("\n [DONE] ¡Purga completada con éxito!\n")
 
 
+# Función principal para buscar archivos y mostrar resultados
+def search_files(query: str) -> None:
+
+    """
+    Usa el motor de búsqueda inteligente (FTS5) para mostrar resultados en consola.
+    """
+
+    print(f"\n[SEARCH] Buscando: '{query}'...")
+    
+    # Me conecto a la base de datos
+    db = HashDatabase(DB_PATH)
+    
+    try:
+        # Buscamos archivos usando el término de búsqueda.
+        results = db.search_by_name(query)
+        
+        if not results:
+            if not query:
+                print("\n[i] No tienes archivos registrados en la base de datos de SmartMule!\n")
+            else:
+                print(f"\n[!] No se encontraron archivos que coincidan con '{query}'.\n")
+            return
+
+        print(f"\n[OK] Se han encontrado {len(results)} coincidencia(s):\n")
+
+        # Cabecera de la tabla de resultados (Ajustada para incluir resolución en TIPO)
+        print(f"{'ID':<4} | {'TIPO':<18} | {'TÍTULO / NOMBRE DE ARCHIVO':<47} | {'SCORE':<6} | {'ESTADO'}")
+        
+        # Separador
+        print("-" * 100)
+
+        for item in results:
+
+            media_type = item.get('media_type', 'unknown').upper()
+            
+            # Mostramos la resolución solo para los tipos de vídeo ("MOVIE", "TV SERIES", "VIDEO")
+            res = item.get('resolution')
+
+            if media_type in ["MOVIE", "TV SERIES", "VIDEO"] and res:
+                media_type = f"{media_type} ({res})"
+
+            title = item.get('official_title') or item.get('file_name', 'Unknown')
+
+            # Visualización de puntuación con 2 decimales para evitar discrepancias con los filtros
+            val = item.get('score', 0.0)
+            score = f"{val:.2f}" if item.get('score') is not None else "N/A"
+
+            status = "ORG" if item.get('is_organized') else "PEN"
+            
+            # Truncamos el título si es muy largo
+            if len(title) > 44:
+                title = title[:41] + "..."
+                
+            print(f"{item['id']:<4} | {media_type:<18} | {title:<47} | {score:<6} | {status}")
+            
+        print(f"\n[DONE] Total: {len(results)} archivos encontrados.\n")
+
+    except Exception as e:
+        print(f"\n[ERR] Error durante la búsqueda: {e}\n")
+        
+    finally:
+        db.close()
+
+
 # Función principal para purgar archivos
 def purge_files(query: str, select_all: bool = False, no_preserve: bool = False) -> None:
 
@@ -371,6 +446,99 @@ def purge_files(query: str, select_all: bool = False, no_preserve: bool = False)
     finally:
         db.close() # Siempre cerramos la conexión a la BBDD
 
+# Función para forzar un nuevo escaneo completo.
+def reprocess_files(query: str, select_all: bool = False) -> None:
+
+    """
+    Invalida los metadatos de archivos para forzar un nuevo escaneo completo.
+    Borra el registro de la BBDD y el hardlink en la biblioteca, permitiendo
+    que el Watcher vuelva a encontrar el archivo en Incoming/ como nuevo.
+    """
+
+    db = HashDatabase(DB_PATH)
+    try:
+        # Buscamos archivos usando el término de búsqueda
+        results = db.search_by_name(query) if query else db.get_all_files()
+        
+        if not results:
+            if not query:
+                print("\n[i] No hay archivos registrados para re-procesar.\n")
+            else:
+                print(f"\n[-] No se encontraron archivos que coincidan con '{query}'.\n")
+            return
+
+        print(f"\n[SEARCH] Se han encontrado {len(results)} coincidencia(s) para re-procesar:\n")
+        
+        # Mostramos los resultados en una tabla
+        _display_candidates(results, select_all)
+
+        # Lista para almacenar los archivos seleccionados por el usuario para ser re-procesados.
+        to_reprocess = []
+
+        if select_all:
+            to_reprocess = results
+
+        else:
+            choice = input("\nSelección para RE-PROCESAR [ej: 1, 3-5] (o 'all'/'quit'): ").strip().lower()
+
+            if choice == 'quit':
+                return
+
+            if choice == 'all':
+                to_reprocess = results
+
+            else:
+
+                try:
+                    indices = _parse_user_selection(choice, len(results))
+                    to_reprocess = [results[i] for i in indices]
+
+                except ValueError:
+                    print("\n[!] Entrada no válida.")
+                    return
+
+
+        if not to_reprocess:
+            return
+
+
+        print(f"\n[*] Iniciando re-procesamiento de {len(to_reprocess)} archivos...")
+        
+        for row in to_reprocess:
+
+            # Obtenemos los datos del archivo.
+            ed2k = row['ed2k_hash']
+            clean_name = row['official_title'] or row['file_name']
+            lib_path = row['final_path']
+            
+            # Mostramos los archivos que se van a re-procesar.
+            # Ejemplo: 🔄 [sf3dg01] Matrix
+            print(f"  🔄 [{ed2k[:8]}] {clean_name}")
+            
+            # Eliminamos el archivo de la BBDD y Caché (usando el Hash Completo)
+            db.delete_by_ed2k(ed2k)
+            
+            # 2. Eliminar el archivo en Library si existe (rompemos el Hard Link)
+            if lib_path:
+                lp = Path(lib_path)
+                if lp.exists():
+                    try:
+                        lp.unlink()
+                        print("    [OK] Hardlink eliminado en Library.")
+                    except Exception as e:
+                        print(f"    [WARN] No se pudo borrar en Library: {e}")
+
+
+        print(f"\n✅ {len(to_reprocess)} archivos invalidados correctamente.")
+        print("ℹ️  SmartMule los identificará de nuevo al detectarlos en 'Incoming'.")
+        print("💡 Importante!!! -> Ejecuta 'smartmule restart' para forzar el re-escaneo.")
+
+
+    except Exception as e:
+        print(f"[ERROR] Error durante el re-procesamiento: {e}")
+    finally:
+        db.close()
+
 
 
 def show_stats() -> None:
@@ -387,10 +555,12 @@ def show_stats() -> None:
         print("===================================================")
         
         CATEGORY_ICONS = {
-            "video": "🎬",
+            "movie": "🎬",
+            "video": "🎥",
             "tv series": "📺",
             "audio": "🎵",
             "book": "📚",
+            "document": "📄",
             "software": "💾",
             "image": "🖼️",
             "compressed": "🗜️",
@@ -596,6 +766,14 @@ def main() -> None:
 COMANDOS DE SERVICIO:
   start             Arranca el motor de vigilancia y organización (por defecto).
   stop              Detiene la instancia activa de SmartMule de forma segura.
+  restart           Reinicia el servicio SmartMule (Stop + Start).
+
+HERRAMIENTAS DE BÚSQUEDA:
+  --search [query]  Realiza una búsqueda inteligente (FTS5) y filtrada en la biblioteca.
+  --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
+  --reprocess [q]   Invalida metadatos para forzar un nuevo análisis (Regex/IA/API).
+    --all                 (Purga/Reprocess) Selecciona automáticamente todos los resultados.
+    --no-preserve         (Purga) Borra archivos físicos sin pedir confirmación.
 
 HERRAMIENTAS ADMINISTRATIVAS:
   --stats           Muestra un resumen detallado e inventario de la biblioteca.
@@ -604,9 +782,6 @@ HERRAMIENTAS ADMINISTRATIVAS:
   --log [N]         Muestra las ultimas N lineas del log (por defecto 30).
   --pid             Muestra el PID del proceso activo de SmartMule.
   --debug           Habilita logs detallados (DEBUG) para diagnóstico.
-    --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
-    --all                 (Purga) Selecciona automáticamente todos los resultados.
-    --no-preserve         (Purga) Borra archivos físicos sin pedir confirmación.
   -h, --help        Muestra este manual de usuario.
 """,
         formatter_class=argparse.RawTextHelpFormatter,
@@ -615,12 +790,15 @@ HERRAMIENTAS ADMINISTRATIVAS:
 EJEMPLOS DE USO:
   > smartmule start              # Iniciar SmartMule
   > smartmule stop               # Detener SmartMule
+  > smartmule --search "Matrix"  # Buscar archivos por título o nombre
+  > smartmule --search "type:movie score>8" # Búsqueda avanzada con filtros
   > smartmule --stats            # Ver inventario y estadísticas
   > smartmule --status           # Chequear salud del sistema
   > smartmule --config           # Ver configuración activa
   > smartmule --log 50           # Ver ultimas 50 lineas del log
   > smartmule --pid              # Ver PID activo
   > smartmule --purge "Matrix"   # Limpiar archivos por búsqueda
+  > smartmule --reprocess "Titanic" # Forzar re-análisis del archivo de la película Titanic
 \n"""
     )
     
@@ -633,12 +811,14 @@ EJEMPLOS DE USO:
     parser.error = custom_error
     
     # Soporte para argumentos posicionales (Solo ciclo de vida del proceso)
-    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop"], 
+    parser.add_argument("action", nargs="?", default="start", choices=["start", "stop", "restart"], 
                         help=argparse.SUPPRESS)
     parser.add_argument("query_pos", nargs="?", help=argparse.SUPPRESS)
 
     # Interfaz de Flags modernas
+    parser.add_argument("--search", nargs="?", const=True, help=argparse.SUPPRESS)
     parser.add_argument("--purge", nargs="?", const=True, help=argparse.SUPPRESS)
+    parser.add_argument("--reprocess", nargs="?", const=True, help=argparse.SUPPRESS)
     parser.add_argument("--stats", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--config", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--status", action="store_true", help=argparse.SUPPRESS)
@@ -650,10 +830,18 @@ EJEMPLOS DE USO:
     
     args = parser.parse_args()
 
-    # 1. Acción STOP: Se puede ejecutar incluso si el Singleton está bloqueado
-    if args.action == "stop":
+    # 1. Acción STOP / RESTART (Fase de parada)
+    if args.action in ["stop", "restart"]:
+
         stop_daemon()
-        sys.exit(0)
+
+        # Si es "stop", salimos
+        if args.action == "stop":
+            sys.exit(0)
+        
+        # Si es "restart", damos un pequeño respiro antes de continuar al arranque
+        import time
+        time.sleep(2)
 
     # 2. Acción STATS: Inventario y estadísticas
     if args.stats:
@@ -670,13 +858,13 @@ EJEMPLOS DE USO:
         show_status()
         sys.exit(0)
     
-    # 2.5 Acción LOG: Últimas N líneas del Log
+    # 2.4 Acción LOG: Últimas N líneas del Log
     if args.log is not None:
         num_lines = args.log if isinstance(args.log, int) else 30
         show_last_logs(num_lines)
         sys.exit(0)
 
-    # 2.7 Acción PID: Mostrar PID activo
+    # 2.5 Acción PID: Mostrar PID activo
     if args.pid:
         pid = get_active_pid()
         if pid:
@@ -685,10 +873,25 @@ EJEMPLOS DE USO:
             print("\n[!] SmartMule no está en ejecución.\n")
         sys.exit(0)
 
+    # 2.6 Acción SEARCH: Motor de búsqueda inteligente
+    if args.search is not None:
+        query = args.search if isinstance(args.search, str) else (args.query_pos or "")
+        search_files(query)
+        sys.exit(0)
+
     # 3. Acción PURGE: Herramienta administrativa
     if args.purge is not None:
+
+        # Si no se proporciona una consulta, se intenta usar la posición
         query = args.purge if isinstance(args.purge, str) else (args.query_pos or "")
+
         purge_files(query, select_all=args.all, no_preserve=args.no_preserve)
+        sys.exit(0)
+
+    # 4. Acción REPROCESS: Invalidad metadatos y caché
+    if args.reprocess is not None:
+        query = args.reprocess if isinstance(args.reprocess, str) else (args.query_pos or "")
+        reprocess_files(query, select_all=args.all)
         sys.exit(0)
 
     # 3. Acción START: El motor principal. Requiere exclusividad (patrón de diseño Singleton)
@@ -773,9 +976,9 @@ EJEMPLOS DE USO:
     watcher = SmartMuleWatcher(queue_manager) # Observador de eventos de disco
 
     # --- GESTIÓN DE APAGADO (Graceful Shutdown) ---
-    def handle_shutdown(signum, frame):
+    def handle_shutdown(signum, _frame):
         """Captura señales de cierre y detiene todos los hilos de forma segura."""
-        logger.warning(f"\n[!] Senal de apagado ({signum}) recibida. Apagando motor...")
+        logger.warning(f"\n[!] Señal de apagado ({signum}) recibida. Apagando motor...")
         watcher.stop() # Detiene el Observer de watchdog
         queue_manager.stop() # Vacía la cola y detiene el Worker thread
         remove_pid() # Limpia el archivo PID

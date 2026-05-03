@@ -352,6 +352,13 @@ class MetadataEngine:
             api_result = best_match
             poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
             
+            # --- MEJORA: Actualizamos el tipo de medio oficial ---
+            # Si venía como 'video' genérico pero TMDB lo ha encontrado, lo promovemos a su tipo real (movie/tv series)
+            if data.get("season"):
+                data["media_type"] = "tv series"
+            else:
+                data["media_type"] = "movie"
+
             # Guardamos los datos obtenidos de TMDB
             data["api_data"] = {
                 "source": "TMDB",
@@ -379,6 +386,9 @@ class MetadataEngine:
             if similitud < 0.7:
                 logger.warning(f"[WARN] Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
             else:
+                # --- MEJORA: Promoción de tipo oficial ---
+                data["media_type"] = "book"
+
                 data["api_data"] = {
                     "source": "OpenLibrary",
                     "official_title": api_result.get("title"),
@@ -430,6 +440,9 @@ class MetadataEngine:
             
             # Si la similitud es alta o contiene el título, se guarda.
             else:
+                # --- MEJORA: Promoción de tipo oficial ---
+                data["media_type"] = "audio"
+
                 data["api_data"] = {
                     "source": "MusicBrainz",
                     "official_title": api_result.get("title"),
@@ -603,17 +616,25 @@ class MetadataEngine:
             return None
             
     
-    # Función que extrae la primera parte del título antes de un 'aka'.
-    # Nota: "aka" es una abreviatura de "also known as" y se usa para indicar que el título es una versión alternativa de algo.
+    # Función que extrae la primera parte del título antes de un 'aka' o limpia ruido residual.
     def _get_plan_b_title(self, title: str) -> Optional[str]:
-
-        # Si el título contiene 'aka' (con cualquier variante de mayúsculas)
+        """
+        Genera una versión simplificada del título para reintentar la búsqueda en la API.
+        Limpia 'aka', guiones sueltos y palabras técnicas que suelen sobrevivir al primer filtro.
+        """
+        original_title = title
+        
+        # 1. Gestión de 'AKA'
         if re.search(r'\s+aka\s+', title, re.IGNORECASE): 
+            title = re.split(r'\s+aka\s+', title, maxsplit=1, flags=re.IGNORECASE)[0]
 
-            # Dividimos por el primer 'aka' que encontremos
-            parts = re.split(r'\s+aka\s+', title, maxsplit=1, flags=re.IGNORECASE) 
+        # 2. Limpieza de ruido técnico común que ensucia la búsqueda
+        # (Palabras que a veces el LLM o Regex dejan por error)
+        noise = [r'-', r'v-?a', r'remaster(ed)?', r'no-?ads?', r'unrated', r'uncut']
+        for pattern in noise:
+            title = re.sub(r'(?i)\b' + pattern + r'\b', ' ', title)
 
-            # Devolvemos la primera parte del título
-            return parts[0].strip() 
+        # Limpiar espacios dobles y guiones/espacios al final
+        title = re.sub(r'\s+', ' ', title).strip().strip('-').strip()
 
-        return None # Si no se encuentra 'aka', devolvemos None
+        return title if title.lower() != original_title.lower() else None

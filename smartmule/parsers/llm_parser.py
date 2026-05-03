@@ -16,11 +16,12 @@ Tu tarea es analizar el nombre "sucio" de un archivo descargado (con el que se l
 
 Reglas:
 1. Elimina etiquetas inútiles: x264, x265, HEVC, AC3, HDRip, WEB-DL, Dual, Spanish, Castellano, subs, uploader name, by mDudikoff, etc.
-2. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
-3. Detecta "season" y "episode" si es una serie. Usa números enteros.
-4. Identifica "year" si existe. Usa número entero.
-5. "media_type" debe ser exactamente uno de los siguientes strings: "video", "tv series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
-6. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
+2. Elimina etiquetas de edición: Remastered, Remaster, V-A, Director's Cut, Extended, Uncut, etc. Estas NO son parte del título.
+3. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
+4. Detecta "season" y "episode" si es una serie. Usa números enteros.
+5. Identifica "year" si existe. Usa número entero.
+6. "media_type" debe ser exactamente uno de los siguientes strings: "video", "tv series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
+7. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
 
 Ejemplo 1: "The.Office.S03E05.1080p.HEVC.x265.mkv"
 {"title": "The Office", "media_type": "tv series", "season": 3, "episode": 5, "quality": "1080p", "year": null}

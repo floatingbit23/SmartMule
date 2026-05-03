@@ -80,16 +80,29 @@ Tests are located in `/tests` and use mock objects for external APIs and file sy
 
 ## 🛠️ Workflows for Agents
 
-### How to Start/Stop the Service (Windows Daemon)
+### How to Start/Stop/Restart the Service (Windows Daemon)
 - **Start**: Run `python main.py start` (standard) or `smartmule_launcher.vbs` (invisible).
 - **Stop**: Run `python main.py stop`. This looks for the persistent PID and shuts down the watcher cleanly.
+- **Restart**: Run `python main.py restart`. Useful after updating cleaning rules or API keys.
 
 ### How to Purge/Delete Files
 Use the purge command to delete files from both `Incoming` and `Library` folders simultaneously.
 - **Search & Destroy**: `python main.py --purge "search_term"`.
 - **Wipe Everything**: `python main.py --purge --all --no-preserve`. This requires a manual string confirmation ("BORRAR TODO").
 
+### How to Force Re-processing (Invalidate Cache)
+If a file was incorrectly identified or you updated the parsing logic, use:
+- **Reprocess**: `python main.py --reprocess "query"`.
+  - **What it does**: Deletes the database record, clears the metadata cache (LLM/API), and removes the hardlink from the `Library`.
+  - **Result**: The original file in `Incoming` remains, and SmartMule will treat it as a brand new file in the next scan.
+
 - **Special Note on Hardlinks**: When using `hardlink` mode (default), files exist in both locations. The purge command removes them from both locations and the database.
+
+### How to Search Files
+SmartMule uses a **FTS5** (_Full-Text Search_) engine for high-performance indexing.
+- **Query**: `python main.py --search "query_term"`.
+- **Features**: Diacritic-insensitive (accent agnostic), prefix matching, regex fallback, and **Filtered Search**.
+- **Filters Syntax**: Supports `type:movie`, `score>8`, `verdict:safe`, `res:1080p`, `organized:yes`.
 
 ### How to Add a New Category
 1. Add classification logic to `smartmule/metadata_engine.py`.

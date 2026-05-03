@@ -6,10 +6,14 @@ enriquecimiento de la biblioteca multimedia.
 
 Este módulo es el "cerebro" que permite:
 1. Optimización P2P: Evitar el recalculo de hashes ED2K/SHA256 y prevenir duplicidad de archivos.
-2. Enriquecimiento Semántico: Almacenar metadatos avanzados (Autores, Títulos, Resoluciones) 
-   obtenidos mediante el análisis híbrido (Regex + LLM + APIs externas).
+
+2. Enriquecimiento Semántico: Almacenar metadatos avanzados (Autores, Títulos, Resoluciones) obtenidos mediante el análisis híbrido (Regex + LLM + APIs externas).
+
 3. Triage de Seguridad: Persistir veredictos de seguridad y enlaces de informes de VirusTotal.
+
 4. Motor de Búsqueda: Servir como base para el sistema de búsqueda global avanzada (FTS5).
+    Cascada de búsqueda: FTS5 (rápido) → REGEXP (rápido) → Distancia de Levenshtein (lento, pero resuelve typos)
+
 5. Trazabilidad: Mantener el estado de organización (is_organized) y rutas físicas finales.
 
 La base de datos es un archivo autónomo ('smartmule.db') ubicado en la carpeta Library. 
@@ -79,6 +83,48 @@ class HashDatabase:
     """
 
 
+    # --- MOTOR DE BÚSQUEDA INTELIGENTE FTS5 (Full-Text Search 5) ---
+
+    # Tabla Virtual FTS5 (Búsqueda Inteligente)
+
+    # Usamos contenido externo ('files') para no duplicar datos y el tokenizer unicode61 con eliminación de diacríticos.
+    _CREATE_FTS_TABLE_SQL = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+            file_name,
+            official_title,
+            author,
+            languages,
+            content='files',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+    """
+
+    # Triggers para sincronización automática en tiempo real
+    _CREATE_TRIGGER_AI_SQL = """
+        CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages);
+        END;
+    """
+
+    _CREATE_TRIGGER_AD_SQL = """
+        CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages);
+        END;
+    """
+
+    _CREATE_TRIGGER_AU_SQL = """
+        CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages);
+        END;
+    """
+
+
     # Migraciones para añadir columnas a bases de datos antiguas de forma segura
     _MIGRATIONS = [
         "ALTER TABLE files ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
@@ -119,8 +165,14 @@ class HashDatabase:
 
         # Abro la conexión con la BBDD SQLite.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+
+        # Devuelvo filas personalizadas que se comportan como diccionarios. Esto facilita el acceso por nombre de columna
         self._conn.row_factory = sqlite3.Row
-        self._conn.create_function("REGEXP", 2, self._regexp_worker)
+
+        # Habilito funciones personalizadas para el motor de búsqueda
+        self._conn.create_function("REGEXP", 2, self._regexp_worker) # REGEX
+        self._conn.create_function("levenshtein", 2, self._levenshtein_distance) # FUZZY SEARCH (ÚLTIMO RECURSO)
+        self._conn.create_function("stem", 1, lambda x: Path(x).stem if x else "") # Eliminar extensiones
 
 
         # 1º. Creo las tablas si no existen.
@@ -137,28 +189,104 @@ class HashDatabase:
                 pass # Si hay error, lo ignoro (la columna ya existía)
 
 
-        # 3º. ÍNDICES: Ahora que las columnas existen seguro, creo el índice si no existe.
+        # 3º. ÍNDICES Y BÚSQUEDA: Ahora que las columnas existen seguro, creamos la infraestructura FTS5.
         self._conn.execute(self._CREATE_INDEX_SQL)
+        
+        # Infraestructura de búsqueda inteligente (FTS5 + Triggers)
+        self._conn.execute(self._CREATE_FTS_TABLE_SQL)
+        self._conn.execute(self._CREATE_TRIGGER_AI_SQL)
+        self._conn.execute(self._CREATE_TRIGGER_AD_SQL)
+        self._conn.execute(self._CREATE_TRIGGER_AU_SQL)
 
 
-        # 4º. Confirmo los cambios en la BBDD.
+        # 4º. POBLADO INICIAL (MIGRACIÓN): Sincroniza archivos preexistentes con el índice FTS5.
+        # Esto solo ocurre la primera vez que se activa FTS5 en una base de datos antigua.
+        cursor = self._conn.execute("SELECT COUNT(*) FROM files_fts")
+
+        if cursor.fetchone()[0] == 0:
+
+            self._conn.execute("""
+                INSERT INTO files_fts(rowid, file_name, official_title, author, languages)
+                SELECT id, file_name, official_title, author, languages FROM files
+            """)
+
+            self._conn.commit()
+
+            logger.info("[i]  Índice FTS5 poblado con registros existentes.")
+
+
+        # 5º. Confirmo los cambios en la BBDD.
         self._conn.commit()
 
         logger.debug(f"[*]  Base de datos SQLite abierta en: {db_path}")
 
 
     def _regexp_worker(self, expr: str, item: str) -> bool:
+
         """
         Función auxiliar que ejecuta la lógica de búsqueda regex.
-        SQLite llama a esta función por cada fila cuando usamos 'WHERE col REGEXP ?'.
+        SQLite la llama por cada fila evaluada en 'WHERE column REGEXP ?'.
         """
-        if item is None:
+
+        if not item:
             return False
         try:
-            # Uso re.IGNORECASE para que no importe si escribes en mayúsculas o minúsculas.
             return re.search(expr, item, re.IGNORECASE) is not None
         except Exception:
             return False
+
+    # FALLBACK A FUZZY SEARCH
+
+    def _levenshtein_distance(self, s1: str, s2: str) -> int:
+
+        """
+        Algoritmo iterativo para calcular la distancia de edición (Levenshtein).
+        Se usa como métrica para la búsqueda difusa (fuzzy search).
+
+        Ejemplo: "Michael" vs "Mikael" -> Distancia 2 (Sustituir 'c' por 'k' + Eliminar 'h').
+        
+        IMPORTANTE!! -> Si la distancia es <= 2, SmartMule suele considerarlos coincidencia válida.
+
+        Pasos del algoritmo (basado en el ejemplo):
+        1. Inicializar fila anterior: [0, 1, 2, 3, 4, 5, 6] (coste de borrar "mikael").
+        2. Iterar sobre s1 ("michael") letra a letra.
+        3. Para cada celda, calcular tres caminos y elegir el MÍNIMO:
+            - Coincidencia (Coste +0) o Sustitución (Coste +1).
+            - Inserción (Coste +1).
+            - Eliminación (Coste +1).
+        4. Las coincidencias ('m', 'i', 'a', 'e', 'l') mantienen el coste bajo.
+        5. Los "conflictos" ('c' vs 'k' y la 'h' extra) suben el marcador.
+        6. El resultado final (2) es el acumulado de operaciones mínimas.
+        """
+        
+        # CASO BASE: Si alguna cadena está vacía, devolvemos la longitud de la otra.
+        if not s1 or not s2:
+            return len(s1 or s2 or "")
+        
+        # PRE-PROCESAMIENTO: Case-insensitive
+        s1, s2 = s1.lower(), s2.lower()
+        
+        # Optimización: s2 siempre debe ser la cadena más corta para reducir espacio
+        if len(s1) < len(s2):
+            return self._levenshtein_distance(s2, s1)
+
+        # Inicializamos la "fila anterior" [0, 1, 2, ..., n]
+        previous_row = range(len(s2) + 1)
+
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                # Costes de las tres operaciones posibles
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                
+                current_row.append(min(insertions, deletions, substitutions))
+
+            previous_row = current_row
+        
+        return previous_row[-1]
+
 
     # Función de búsqueda por hash ED2K
     def get_by_hash(self, ed2k_hash: str) -> Optional[dict]:
@@ -261,18 +389,178 @@ class HashDatabase:
         logger.debug(f"[*]  Hash guardado en caché: {ed2k_hash} ({file_path.name})")
 
 
-    # Función de búsqueda por nombre (para el comando purge)
-    def search_by_name(self, query: str) -> list[dict]:
-
+    # --- MOTOR DE BÚSQUEDA INTELIGENTE ---
+    
+    def _sanitize_fts_query(self, raw_query: str) -> str:
         """
-        Busca registros cuyos nombres de archivo o títulos oficiales coincidan con la consulta.
-        Soporta wildcards estilo shell (N*) y expresiones regulares (re).
+        Convierte un término de búsqueda libre en una consulta FTS5 segura.
+        Envuelve cada token entre comillas dobles para evitar que FTS5
+        interprete operadores no intencionados (guiones, puntos, paréntesis).
+        """
+        # Dividimos por espacios y envolvemos cada fragmento entre comillas
+        tokens = raw_query.split()
+        
+        # Cada token se escapa individualmente: "The" "Matrix" "1999"
+        safe_tokens = [f'"{t}"' for t in tokens if t.strip()]
+        
+        if not safe_tokens:
+            return '""'
+        
+        return " ".join(safe_tokens)
+
+
+    def _parse_filtered_query(self, raw_query: str) -> tuple[str, list, list]:
+        """
+        Separa una consulta mixta en texto libre + filtros SQL con lógica avanzada.
+        Soporta multi-valor (OR para el mismo campo), búsquedas parciales y fechas.
+
+        Ejemplo: "type:movie type:tv score>7.5 res:1080p verdict:safe added:today organized:y" ->
+        "Busca películas O series que tengan una puntuación mayor a 7.5, sean de resolución 1080p, tengan un veredicto seguro, hayan sido añadidas hoy y estén organizadas."
+        """
+        grouped_raw = {} # { "col": [ (op, val, is_raw), ... ] }
+        remaining = raw_query
+        
+        # 1. Definición de patrones y handlers
+        def organized_handler(m):
+            val = m.group(1).lower()
+            # Si el usuario escribe 'organized:yes/y/true/t/1', se traduce a 'is_organized = 1' (True)
+            # Si el usuario escribe 'organized:no/n/false/f/0', se traduce a 'is_organized = 0' (False)
+            return ("is_organized", "= ?", 1 if val in ["yes", "y", "1", "true", "t"] else 0, False)
+
+        # Handler para fechas: 'added:today' o 'added:Nd' (Nd = N días)
+        def date_handler(m):
+
+            val = m.group(1).lower()
+
+            if val == "today":
+                return ("processed_at", ">=", "date('now', 'localtime')", True)
+
+            elif val.endswith("d"):
+                days = val[:-1]
+                return ("processed_at", ">=", f"date('now', '-{days} days', 'localtime')", True)
+                
+            return (None, None, None, None)
+
+        filter_patterns = {
+            r"type:(\S+)":       lambda m: ("media_type", "LIKE ?", f"{m.group(1).lower()}%", False),
+            r"score([><=]+)([\d.]+)": lambda m: ("score", f"{m.group(1)} ?", float(m.group(2)), False),
+            r"verdict:(\S+)":    lambda m: ("security_verdict", "LIKE ?", f"{m.group(1).upper()}%", False),
+            r"res:(\S+)":        lambda m: ("resolution", "LIKE ?", f"{m.group(1)}%", False),
+            r"organized:(\S+)":  organized_handler,
+            r"added:(\d+d|today)": date_handler,
+        }
+        
+        # 2. Extracción de filtros
+        for pattern, handler in filter_patterns.items():
+
+            # Buscamos todas las ocurrencias del patrón
+            matches = list(re.finditer(pattern, remaining, re.IGNORECASE))
+
+            # Itera sobre todos los matches encontrados
+            for match in matches:
+
+                try:
+                    col, op, val, is_raw = handler(match)
+                    
+                    if col:
+                        if col not in grouped_raw: grouped_raw[col] = []
+                        grouped_raw[col].append((op, val, is_raw))
+
+                except Exception as e:
+                    logger.debug(f"[i] Error parseando filtro '{match.group(0)}': {e}")
+
+            remaining = re.sub(pattern, '', remaining, flags=re.IGNORECASE)
+
+        # 3. Construcción de cláusulas SQL agrupadas por campo (OR interno, AND externo)
+        conditions = []
+        params = []
+        
+        for col, items in grouped_raw.items():
+            field_clauses = []
+            for op, val, is_raw in items:
+                if is_raw:
+                    field_clauses.append(f"f.{col} {op} {val}")
+                else:
+                    field_clauses.append(f"f.{col} {op}")
+                    params.append(val)
+            
+            # Unimos los valores del mismo campo con OR
+            if field_clauses:
+                conditions.append("(" + " OR ".join(field_clauses) + ")")
+        
+        text_query = remaining.strip()
+
+        return text_query, conditions, params
+
+
+    def search_by_name(self, query: str) -> list[dict]:
+        """
+        Motor de búsqueda híbrido avanzado con soporte para filtros agrupados.
+        """
+
+        # Si no hay query, devolvemos todo (--purge sin argumentos)
+        if not query:
+            return self.get_all_files()
+
+        # --- 1. PARSE DE FILTROS ---
+        text_query, filter_conditions, filter_params = self._parse_filtered_query(query)
+
+        # Base de la consulta
+        sql_base = "SELECT f.* FROM files f"
+        where_clauses = []
+        all_params = []
+
+        # Si hay texto, usamos FTS5 (MATCH contra la tabla virtual)
+        if text_query:
+            sql_base += " JOIN files_fts fts ON f.id = fts.rowid"
+            where_clauses.append("files_fts MATCH ?")
+            all_params.append(self._sanitize_fts_query(text_query))
+
+        # Añadimos los filtros agrupados
+        for cond in filter_conditions:
+            where_clauses.append(cond)
+        all_params.extend(filter_params)
+
+        try:
+            sql = sql_base
+            if where_clauses:
+                sql += " WHERE " + " AND ".join(where_clauses)
+            
+            sql += " ORDER BY f.processed_at DESC"
+            
+            cursor = self._conn.execute(sql, tuple(all_params))
+            results = [dict(row) for row in cursor.fetchall()]
+            
+            # Si no hay resultados FTS5 y hay texto, intentamos fallbacks
+            if not results and text_query:
+                # 1. Fallback a Regex (si no hay filtros puros)
+                if not filter_conditions:
+                    results = self._search_by_regexp(text_query)
+                
+                # 2. Si sigue sin haber resultados, intentamos Fuzzy (último recurso)
+                if not results and len(text_query) > 3 and "*" not in text_query:
+                    results = self._search_fuzzy(text_query, filter_conditions, filter_params)
+                    if results:
+                        logger.info(f"[!] Resultados difusos encontrados para '{text_query}'")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"[ERR] Error en búsqueda: {e}")
+            return []
+
+
+    def _search_by_regexp(self, query: str, filter_conditions: list = None, filter_params: list = None) -> list[dict]:
+        
+        """
+        Fallback basado en expresiones regulares para soportar wildcards (* y ?) y regex avanzados.
         """
 
         # Procesamos el término de búsqueda.
         regex_pattern = query
 
         # --- INTELIGENCIA DE BÚSQUEDA ---
+
         # Si el usuario usa '*' o '?', convertimos a regex.
         # Pero solo si NO parece una expresión regular compleja (que ya traiga +, [, ], etc.)
         regex_chars = ['+', '[', ']', '(', ')', '{', '}', '$', '^']
@@ -281,28 +569,72 @@ class HashDatabase:
         if ("*" in query or "?" in query) and not has_regex_markers:
 
             # Es un patrón simple de "wildcard" (estilo shell).
+            
             # Escapamos caracteres especiales pero convertimos los wildcards:
             # '*' -> '.*' (cualquier cosa)
             # '?' -> '.'  (un carácter)
 
             regex_pattern = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
             
-            # Si el patrón no empieza por wildcard, anclamos al principio para que "N*" sea "Empieza por N"
+            # Si el patrón no empieza por wildcard, anclamos al principio
             if not query.startswith("*") and not regex_pattern.startswith("^"):
                 regex_pattern = "^" + regex_pattern
         
-        # SQL con el operador REGEXP (habilitado por nuestra función personalizada)
+        # SQL con el operador REGEXP y soporte para filtros
         sql = """
             SELECT * FROM files 
-            WHERE file_name REGEXP ? OR official_title REGEXP ?
-            ORDER BY processed_at DESC
+            WHERE (file_name REGEXP ? OR official_title REGEXP ?)
         """
+        all_params = [regex_pattern, regex_pattern]
+
+        if filter_conditions:
+            for cond in filter_conditions:
+                sql += f" AND {cond}"
+            all_params.extend(filter_params)
+            
+        sql += " ORDER BY processed_at DESC"
         
         try:
-            cursor = self._conn.execute(sql, (regex_pattern, regex_pattern))
+            cursor = self._conn.execute(sql, tuple(all_params))
+            return [dict(row) for row in cursor.fetchall()]
+
+        except Exception as e:
+            logger.error(f"[ERR]  Error en búsqueda Regex/Wildcard con filtros '{query}': {e}")
+            return []
+
+
+    def _search_fuzzy(self, query: str, filter_conditions: list = None, filter_params: list = None, max_distance: int = 2) -> list[dict]:
+       
+        """
+        Búsqueda difusa como último recurso contra errores tipográficos (typos).
+        Calcula la distancia de Levenshtein entre el query y los títulos.
+
+        La función levenshtein(a, b) calcula cuántas letras necesitas cambiar, añadir o borrar para transformar "a" en "b".
+        La función stem() elimina la extensión del archivo para tratar "matrix.mkv" como "matrix".
+        """
+
+        # SQL que calcula la distancia de Levenshtein mínima entre el nombre de archivo (sin extensión) y el título oficial
+        # Nota: SQLite no permite usar el alias 'dist' en el WHERE directamente.
+        sql = """
+            SELECT *, 
+                   MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) as dist
+            FROM files 
+            WHERE MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) <= ?
+        """
+        all_params = [query, query, query, query, max_distance]
+
+        if filter_conditions:
+            for cond in filter_conditions:
+                sql += f" AND {cond}"
+            all_params.extend(filter_params)
+            
+        sql += " ORDER BY dist ASC, processed_at DESC LIMIT 10"
+        
+        try:
+            cursor = self._conn.execute(sql, tuple(all_params))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"[ERR]  Error en búsqueda Regex/Wildcard '{query}': {e}")
+            logger.error(f"[ERR]  Error en búsqueda difusa para '{query}': {e}")
             return []
 
 
@@ -314,6 +646,24 @@ class HashDatabase:
         self._conn.execute("DELETE FROM files WHERE id = ?", (record_id,))
         self._conn.commit()
         logger.debug(f"[*]  Registro {record_id} eliminado de la base de datos.")
+
+
+    # Función para eliminar un registro y su caché por Hash ED2K
+    def delete_by_ed2k(self, ed2k_hash: str) -> None:
+
+        """
+        Elimina un archivo de la tabla principal y de la caché de metadatos usando el hash completo.
+        Esto fuerza a que el archivo sea re-identificado desde cero (vuelva a pasar el flujo REGEX -> IA -> API).
+        """
+
+        # 1. Borrar de la tabla principal 'files' usando el hash ED2K oficial
+        self._conn.execute("DELETE FROM files WHERE ed2k_hash = ?", (ed2k_hash,))
+        
+        # 2. Borrar de la caché de metadatos (LLM/API)
+        self._conn.execute("DELETE FROM metadata_cache WHERE ed2k_hash = ?", (ed2k_hash,))
+        
+        self._conn.commit()
+        logger.debug(f"[*]  Registro y caché eliminados para hash: {ed2k_hash[:8]}...")
 
 
     # Función de actualización de metadatos

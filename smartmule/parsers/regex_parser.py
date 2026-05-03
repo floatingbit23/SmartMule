@@ -34,7 +34,7 @@ SCENE_TAGS = [
     # Calidades y Formatos
     r"hdrip", r"web-?dl", r"web-?rip", r"bluray", r"brrip", r"bdrip", r"dvdrip", r"dvd-?scr",
     r"remux", r"hybrid", r"bdmux", r"telesync", r"ts", r"cam", r"hdcam", r"hdts", r"hdtv",
-    r"proper", r"repack", r"rerip", r"internal", r"remastered", r"uncut", r"unrated", r"uncensored",
+    r"proper", r"repack", r"rerip", r"internal", r"remaster(ed)?", r"v-?a", r"no-?ads?", r"uncut", r"unrated", r"uncensored",
     r"imax", r"criterion", r"anniversary", r"extended", r"directors?.?cut", r"special.?edition",
     r"theatrical", r"3d", r"sbs", r"half-?ou", r"half-?sbs", r"open.?matte", r"cc", r"v\.?o\.?s\.?",
     
@@ -201,7 +201,7 @@ def parse_filename(filename: str) -> dict:
         if q_match:
             val = q_match.group(0).lower().replace(" ", "")
             result["quality"] = val
-            # Si el tag es una resolución conocida (según tus facetas de BDD), la guardamos en resolution
+            # Si el tag es una resolución conocida (según los filtros de la BDD), la guardamos en resolution
             if re.match(r'\d{3,4}p|4k|uhd|2k', val):
                 result["resolution"] = val
             clean_name = clean_name.replace(q_match.group(0), " ")
@@ -263,11 +263,11 @@ def parse_filename(filename: str) -> dict:
         
         if valid_codes:
             # Guardamos códigos únicos y ordenados (ej: EN-ES)
-            result["languages"] = "-".join(sorted(list(set(valid_codes))))
+            result["languages"] = "-".join(sorted(set(valid_codes)))
 
     # === EXTRACCIÓN DE SUBTÍTULOS (VOSE, VOS, SUBS, HC) ===
-    # Buscamos patrones de subtítulos (incluyendo V O S con espacios y HCSubs)
-    sub_pattern = r'(?i)\b(v\s*o\s*s\s*e|v\s*\.\s*o\s*\.\s*s\s*\.\s*e\s*\.?|v\s*\.\s*o\s*\.\s*s\s*\.?|v\s*o\s*s|subs?|subtitles?|hc-?subs?)\b'
+    # Buscamos patrones de subtítulos de forma ultra-simplificada para evitar complejidad
+    sub_pattern = r'(?i)\b(v[ .]?o[ .]?s[ .]?e?\.?|sub(?:titles?)?|hc-?subs?)\b'
     sub_matches = re.findall(sub_pattern, clean_name)
     
     if sub_matches:
@@ -301,22 +301,42 @@ def parse_filename(filename: str) -> dict:
     # 3. Quitar solo los símbolos para el resto, preservando el texto (títulos duales)
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
-    # Quitar palabras técnicas y extensiones falsas (Lista extendida y más agresiva)
-    clean_name = re.sub(r'(?i)\b(audio|subs?|torrent|mkv|avi|mp4|bluray|bd|br|hdr|hevc|web-?dl|web-?rip|bd-?rip|micro|10b|atticusF|bone|mokona|braemen|yts|yolow|rarbg|cyber|olimpo|hmr|djt|wrs|kvm|lucy|yg|mogli\d*|premiere|proper|advanced|good|quality|fant|various|artists|motion|picture|soundtrack|original|vip|hdlatino|ac3|aac\d*|av1|xvid|ld-aac|ld|md|allsubs|multisubs|multisub|multisubtitulos|v2|repack|adv|hdts|runneo|sharethefiles|cinecalidad)\b', ' ', clean_name)
+    # Quitar palabras técnicas, grupos de ripeo y extensiones falsas
+    
+    # Agrupamos en una lista para evitar una regex monolítica ilegible
+    tech_keywords = [
+        r"audio", r"subs?", r"torrent", r"mkv", r"avi", r"mp4", r"bluray", r"bd", r"br", r"hdr", r"hevc",
+        r"web-?dl", r"web-?rip", r"bd-?rip", r"micro", r"10b", r"yts", r"yolow", r"rarbg", r"cyber",
+        r"olimpo", r"hmr", r"djt", r"wrs", r"kvm", r"lucy", r"yg", r"mogli\d*", r"premiere", r"proper",
+        r"advanced", r"good", r"quality", r"fant", r"various", r"artists", r"motion", r"picture",
+        r"soundtrack", r"original", r"vip", r"hdlatino", r"ac3", r"aac\d*", r"av1", r"xvid", r"ld-aac",
+        r"ld", r"md", r"allsubs", r"multisubs", r"multisub", r"multisubtitulos", r"v2", r"repack",
+        r"adv", r"hdts", r"runneo", r"sharethefiles", r"cinecalidad", r"atticusF", r"bone", r"mokona", r"braemen"
+    ]
+    tech_pattern = r'(?i)\b(' + '|'.join(tech_keywords) + r')\b'
+    clean_name = re.sub(tech_pattern, ' ', clean_name)
     
     # Quitar códecs con puntos o espacios (ej: H.264, DD5.1, DD5 1)
-    clean_name = re.sub(r'(?i)\b(h[\.\s]?264|x[\.\s]?264|h[\.\s]?265|x[\.\s]?265|dd[\.\s]?5[\.\s]?1|ac3|dts|aac|av1|xvid|ld-aac)\b', ' ', clean_name)
+    codec_list = [
+        r"[hx][.\s]?26[45]", r"dd[.\s]?5[.\s]?1",
+        r"ac3", r"dts", r"aac", r"av1", r"xvid", r"ld-aac"
+    ]
+    codec_pattern = r'(?i)\b(' + '|'.join(codec_list) + r')\b'
+    clean_name = re.sub(codec_pattern, ' ', clean_name)
 
     # Quitar palabras de idiomas (solo las largas o técnicas) usando el mapa dinámico
     # Filtramos el mapa para NO incluir códigos de 2 letras (evita colisiones con "en", "es"), 
     # pero SÍ incluimos los de 3 letras (SPA, ENG, ITA) que son seguros.
     lang_clean_list = [k for k in LANGUAGE_MAP.keys() if len(k) > 2]
-    lang_clean_pattern = '|'.join(re.escape(k) for k in lang_clean_list)
-    clean_name = re.sub(r'(?i)\b(' + lang_clean_pattern + r'|subs?|sub|dual|vose|multi|v\.o\.s\.?|v\.o\.s\.e\.?)\b', ' ', clean_name)
+    lang_clean_list += ["subs?", "sub", "dual", "vose", "multi", r"v\.o\.s\.?e?\.?"]
+    lang_clean_pattern = r'(?i)\b(' + '|'.join(re.escape(k) if "\\" not in k else k for k in lang_clean_list) + r')\b'
+    clean_name = re.sub(lang_clean_pattern, ' ', clean_name)
 
     # Limpieza de etiquetas de calidad pegadas y tipos de ripeo de cine
     clean_name = re.sub(r'(?i)\b(bd|br|web|hd)1080p\b', ' ', clean_name)
-    clean_name = re.sub(r'(?i)\b(telesync|ts|tc|hdts|hc-ts|hcsubs|camrip|cam|ld|md)\b', ' ', clean_name)
+    rip_list = ["telesync", "ts", "tc", "hdts", "hc-?ts", "hcsubs", "camrip", "cam", "ld", "md"]
+    rip_pattern = r'(?i)\b(' + '|'.join(rip_list) + r')\b'
+    clean_name = re.sub(rip_pattern, ' ', clean_name)
 
 
     # Eliminar puntuación residual pero PRESERVANDO apóstrofes internos para contracciones (He's, Don't)

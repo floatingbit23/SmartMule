@@ -36,20 +36,25 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
     -   **Inspección de Contenedores**: El `ArchiveInspector` analiza archivos `.zip`, `.rar` y `.7z` buscando inconsistencias (ej: un `.exe` disfrazado de película) y mostrando el contenido sospechoso en los logs.
     -   **Puntuaciones Críticas**: Si un archivo tiene más de 5 detecciones en VT (priorizando motores TOP como Microsoft o Kaspersky), lo mueve a **Review** para evitar riesgos.
 
-*   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas(ej: Solaris 1972 vs Solaris 2002).
+*   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
+
+*   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros. Localiza cualquier archivo por título, tipo, puntuación o resolución al instante.
+    ```bash
+    python main.py --search "Matrix"               # Búsqueda por nombre o título
+    python main.py --search "type:movie score>8"  # Búsqueda con filtros
+    ```
 
 *   **Triaje Automático**: 
-    -   `MALICIOUS`: Borrado automático destructivo.
-    -   `SUSPICIOUS`: Cuarentena para revisión manual.
     -   `SAFE`: Organización temática automatizada.
+    -   `SUSPICIOUS`: Cuarentena para revisión manual.
+    -   `MALICIOUS`: Borrado automático destructivo.
 
     ![alt text](/images/suspicious.png)
     ![alt text](/images/antimalware.png)
 
-
 *   **Privacidad**: Compatible con modelos locales (LM Studio) para procesar nombres sin subirlos a la nube.
 
-*  **Gasto de recursos muy bajo**: SmartMule está diseñado para ejecutarse en segundo plano sin interferir con el uso normal del PC. Para ello, establece una prioridad de I/O (`IOPRIO_VERYLOW`) y CPU (`IDLE_PRIORITY_CLASS`) mínimas, de forma que el SO solo asigna recursos al proceso cuando no hay otras aplicaciones demandándolos.
+*  **Gasto de recursos muy bajo**: SmartMule está diseñado para ejecutarse en segundo plano sin interferir con el uso normal del PC. Establece una prioridad de I/O (`IOPRIO_VERYLOW`) y CPU (`IDLE_PRIORITY_CLASS`) mínimas.
 
 ---
 
@@ -59,12 +64,13 @@ SmartMule permite elegir cómo se gestionan los archivos físicamente mediante l
 
 | Modo | Soporta _Seeding_ (eMule) | Descripción |
 | :--- | :--- | :--- |
-| **`hardlink`** (Por defecto) | ✅ **Sí** | Crea un vínculo físico. El archivo aparece en `Incoming` y `Library` pero **solo ocupa espacio una vez**. Ideal para seguir compartiendo mientras mantienes tu biblioteca limpia. |
-| **`move`** | ❌ **No** | Mueve el archivo de una carpeta a otra. Es instantáneo pero eMule dejará de compartirlo al no encontrarlo en la ruta original. |
-| **`copy`** | ✅ **Sí** | Duplica el archivo. Es el más lento y **consume el doble de espacio**, pero es el único que funciona entre discos duros físicos distintos. |
+| **`hardlink`** (Por defecto) | ✅ **Sí** | Crea un vínculo físico. El archivo aparece en `Incoming` y `Library` pero **solo ocupa espacio una vez**. |
+| **`move`** | ❌ **No** | Mueve el archivo. eMule dejará de compartirlo al no encontrarlo en la ruta original. |
+| **`copy`** | ✅ **Sí** | Duplica el archivo. Consume el doble de espacio pero funciona entre discos físicos distintos. |
 
 >[!TIP]
 > Usa **`hardlink`** siempre que `Incoming` y `Library` estén en el mismo disco duro.
+
 ---
 
 ## 🛠️ Requisitos del Sistema
@@ -92,17 +98,12 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 ## Cómo funciona (El Pipeline de Datos)
 
-1.  **Monitorización**: El `Watcher` detecta el archivo e inicia una espera de desbloqueo (_I/O unlock_).
-
-2.  **Caché Inteligente**: Se calcula una "Fingerprint" rápida. Si el archivo ya existe y el `mtime` (_modification time_) no ha cambiado, se reutilizan los metadatos para ahorrar APIs.
-
-3.  **Análisis Semántico**: Si es un contenedor, el `ArchiveInspector` busca amenazas antes de que el usuario lo abra.
-
-4.  **Capa IA (LLM)**: Limpia el nombre "sucio" de la _Scene_ y detecta el tipo de medio (Cine, Música, Libros, Software, etc.).
-
-5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary** usando el año y metadatos técnicos para un emparejamiento preciso.
-
-6.  **Organización**: El `LibraryOrganizer` mueve el archivo a su destino final (ej: `/Library/Movies_and_Series/Matrix (1999).mkv`).
+1.  **Monitorización**: El `Watcher` detecta el archivo.
+2.  **Caché Inteligente**: Se calcula una "Fingerprint" rápida para evitar duplicar análisis.
+3.  **Análisis Semántico**: El `ArchiveInspector` busca amenazas en contenedores.
+4.  **Capa IA (LLM)**: Limpia el nombre y detecta el tipo de medio.
+5.  **Enriquecimiento (API)**: Consulta **TMDB** u **OpenLibrary**.
+6.  **Organización**: El `LibraryOrganizer` mueve el archivo a su destino final.
 
 ---
 
@@ -172,10 +173,12 @@ Si quieres que el comando `smartmule` funcione tanto en **PowerShell** como en *
 Una vez configurado el alias, podrás usar desde cualquier terminal:
 *   `smartmule start` (Arranca el motor de SmartMule)
 *   `smartmule stop` (Detiene el servicio)
+*   `smartmule restart` (Reinicia el servicio)
 *   `smartmule --stats` (Ver inventario y estadísticas de almacenamiento)
 *   `smartmule --status` (Ver salud y dependencias del sistema)
 *   `smartmule --config` (Ver rutas y configuración de APIs activas)
 *   `smartmule --purge "Nombre"` (Borrar archivos)
+*   `smartmule --reprocess "Nombre"` (Forzar re-análisis de un archivo)
 *   `smartmule --debug` (Arranca con logs detallados de IA)
 *   `smartmule --pid`  (Muestra el PID del proceso activo)
 
@@ -206,6 +209,13 @@ Ejemplo de uso:
     python main.py --purge --all --no-preserve
     ```
     *Nota: Este comando requiere una confirmación de texto (escribir "BORRAR TODO") por seguridad.*
+
+### 🔄 Re-procesamiento (Forzar identificación)
+A veces, un archivo puede clasificarse erróneamente (ej: como "Video" genérico) porque el título estaba demasiado "sucio" o la llamada a la API falló. Si actualizas SmartMule o mejoras tus reglas de limpieza, puedes forzar que se vuelva a analizar desde cero:
+
+*   **Comando**: `smartmule --reprocess "Nombre"`
+*   Elimina el registro de la BBDD, borra la caché de la IA y elimina el archivo de la `Library`. El archivo original en `Incoming` permanece intacto. SmartMule lo detectará como un archivo nuevo y aplicará el pipeline de identificación completo de nuevo. 
+    _(💡 Nota: Es recomendable ejecutar `smartmule restart` tras este comando para forzar el re-escaneo inmediato)._
 
 ### 🚀 Purga en un solo clic (Multiplataforma)
 Para mayor comodidad, SmartMule despliega automáticamente herramientas de acceso directo dentro de tu carpeta de biblioteca (`LIBRARY_PATH`):

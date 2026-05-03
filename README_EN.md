@@ -45,6 +45,12 @@ By default, eMule places all completed downloads into a single `Incoming` folder
     ![alt text](/images/suspicious.png)
     ![alt text](/images/antimalware.png)
 
+*   **Intelligent Search (FTS5)**: Integrated global search engine with support for filters. Locate any file by title, type, score, or resolution instantly.
+    ```bash
+    python main.py --search "Matrix"               # Simple search
+    python main.py --search "type:movie score>8"  # Filtered search
+    ```
+
 *   **Privacy**: Compatible with local models (LM Studio) to process names without uploading them to the cloud.
 
 *  **Ultra-low resource usage**: SmartMule is designed to run in the background without interfering with normal PC usage. To achieve this, it sets minimal I/O (`IOPRIO_VERYLOW`) and CPU (`IDLE_PRIORITY_CLASS`) priorities, ensuring the OS only allocates resources to the process when no other applications are demanding them.
@@ -138,6 +144,11 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
     ```
     ![alt text](/images/inventory.png)
 
+*   **Intelligent Search**: To quickly locate any file by its official title or original name, use the `--search` flag. The FTS5 engine allows for fast and accent-insensitive searches:
+    ```bash
+    python main.py --search "Matrix"
+    ```
+
 ### Linux Alias
 
 To avoid typing the virtual environment path every time you want to use the CLI, you can create an alias in your terminal:
@@ -164,12 +175,15 @@ To avoid typing the virtual environment path every time you want to use the CLI,
 Once the alias is configured, you will be able to use from any terminal:
 *   `smartmule start` (Starts the SmartMule engine)
 *   `smartmule stop` (Stops the service)
+*   `smartmule restart` (Restarts the service)
 *   `smartmule --stats` (View library inventory and storage statistics)
 *   `smartmule --status` (View system health and dependencies)
 *   `smartmule --config` (View active paths and API configuration)
 *   `smartmule --purge "Name"` (Delete files)
+*   `smartmule --reprocess "Name"` (Force file re-analysis)
 *   `smartmule --debug` (Start with detailed AI logs)
 *   `smartmule --pid`  (Shows the active process PID)
+*   `smartmule --search "Name"` (Search files)
 
 ---
 
@@ -198,6 +212,13 @@ Use example:
     python main.py --purge --all --no-preserve
     ```
     *Note: This command requires a text confirmation ("BORRAR TODO") for safety.*
+
+### 🔄 Re-processing (Force Identification)
+Sometimes, a file might be incorrectly classified (e.g., as a generic "Video") because the title was too noisy or the API failed. If you update SmartMule or improve your cleaning rules, you can force it to be analyzed again from scratch:
+
+*   **Command**: `smartmule --reprocess "Name"`
+*   Deletes the database record, clears the AI cache, and removes the file from the `Library`. The original file in `Incoming` remains intact. SmartMule will detect it as a new file and apply the full identification pipeline again.
+    _(💡 Note: It is recommended to run `smartmule restart` after this command to force an immediate re-scan)._
 
 ### 🚀 One-Click Purge (Cross-platform)
 For extra convenience, SmartMule automatically deploys shortcut tools inside your library folder (`LIBRARY_PATH`):
