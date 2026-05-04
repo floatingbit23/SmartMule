@@ -16,6 +16,7 @@ def db(tmp_path):
         ("path/3", "Netfly.ps1", "", "unknown", 0.0),
         ("path/4", "Foto_2024.jpg", "", "image", 0.0),
         ("path/5", "Inception.mp4", "Inception", "movie", 8.8),
+        ("path/6", "Puñales por la espalda (2019).mkv", "Puñales por la espalda", "movie", 7.9),
     ]
     
     for path, name, title, mtype, score in test_data:
@@ -79,8 +80,8 @@ def test_regex_compat(db):
 def test_empty_query(db):
     """Query vacía: Devuelve todos los archivos"""
     results = db.search_by_name("")
-    # Tenemos 5 archivos en test_data
-    assert len(results) == 5
+    # Tenemos 6 archivos en test_data
+    assert len(results) == 6
 
 # --- TESTS FASE 2: FUZZY SEARCH ---
 
@@ -89,6 +90,13 @@ def test_fuzzy_typo(db):
     results = db.search_by_name("Matirx")
     assert len(results) >= 1
     assert "Matrix" in (results[0]['official_title'] or results[0]['file_name'])
+
+def test_fuzzy_word_in_long_title(db):
+    """Fuzzy por palabra: Encuentra 'Puñales por la espalda' buscando 'Punnñales' (con typo)"""
+    # Antes esto fallaba porque 'Punnñales' (10) no es similar en longitud a 'Puñales por la espalda' (22) y el filtro de longitud lo descartaba.
+    results = db.search_by_name("Punnñales")
+    assert len(results) >= 1
+    assert "Puñales por la espalda" in results[0]['official_title']
 
 # --- TESTS FASE 3: FILTROS ---
 

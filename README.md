@@ -4,7 +4,7 @@
 
 ### El Bibliotecario Inteligente para el Ecosistema P2P
 
-**SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
+**SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, clientes Torrent, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial (_Small Language Models_) para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
 
 ![SmartMule](/images/SmartMule_Logo_Oficial.png)
 
@@ -22,13 +22,33 @@ Por defecto, eMule deposita todas las descargas finalizadas en una única carpet
 
 ---
 
+## 📂 Estructura de la Biblioteca
+
+SmartMule organiza tus archivos en las siguientes categorías automáticas dentro de tu carpeta `Library`:
+
+| Categoría | Carpeta | Descripción |
+| :--- | :--- | :--- |
+| 🎬 **Cine y TV** | `Movies_and_Series` | Películas y episodios de series (MKV, MP4, AVI, etc.). |
+| 🎵 **Música** | `Music` | Álbumes y pistas de audio (MP3, FLAC, OGG, etc.). |
+| 📚 **Libros** | `Books` | eBooks, cómics y documentos técnicos (PDF, EPUB, CBR, etc.). |
+| 💾 **Software** | `Software` | Programas e instaladores (EXE, MSI, APK, etc.). |
+| 📄 **Información** | `Information` | Metadatos P2P (`.torrent`, `.emulecollection`), archivos `.nfo` y `.md5`. |
+| 📦 **Comprimidos** | `Compressed` | Archivos ZIP, RAR o 7Z que no contienen medios claros. |
+| 🖼️ **Imágenes** | `Images` | Fotos y material gráfico (JPG, PNG, WEBP, etc.). |
+| 📝 **Documentos** | `Documents` | Archivos de texto y ofimática (DOCX, XLSX, TXT, etc.). |
+| 📁 **Otros** | `Other` | Archivos que no han podido ser categorizados automáticamente. |
+| 🛡️ **Cuarentena** | `00_Quarantine` | Archivos altamente sospechosos o detectados como maliciosos por el sistema antimalware. |
+| 🔍 **Revisión** | `01_Review` | Archivos que requieren intervención manual para su clasificación. |
+
 ## Características Principales
 
 *   **Vigilancia Activa (Watchdog)**: Detecta archivos nuevos en tu carpeta `Incoming` al instante.
 
 *   **Doble Capa de Verificación**: Identifica archivos por su nombre (IA) y por su contenido (Hash ED2K / Fingerprint). 
 
-*   **Soporte de Directorios (Folder Grouping)**: SmartMule detecta si una descarga es una carpeta (ej: película con subtítulos). Identifica el archivo principal para el hashing y los metadatos, pero mueve y renombra **toda la carpeta** como una única unidad funcional.
+*   **Soporte para Agrupación y Metadatos**: SmartMule detecta si una descarga es una carpeta (ej: película con subtítulos). Identifica el archivo principal para el hashing pero mueve la **carpeta completa**. 
+
+    Además, organiza automáticamente archivos operativos como **Colecciones de eMule (`.emulecollection`)** y archivos **`.torrent`** en la categoría de `Información`.
 
 *   **Antimalware Semántico (Triaje de Élite)**: Inspección profunda de archivos sin extracción usando **VirusTotal**. SmartMule no se fía de nadie:
     -   **Análisis de Macros**: Detecta documentos de Office con macros (`.xlsm`, `.docm`, etc.) y formatos antiguos (`.doc`, `.xls`) tratándolos como ejecutables.
@@ -187,14 +207,14 @@ Una vez configurado el alias, podrás usar desde cualquier terminal:
 
 ## Mantenimiento y Purga (_Smart Deletion_)
 
-_Cuando usas el modo `hardlink` (predeterminado), borrar un archivo de tu biblioteca no lo borra físicamente del disco si aún existe en la carpeta `Incoming` (y viceversa). Esto es necesario para seguir compartiendo como cliente eMule (y ganar créditos en la red), pero puede ser tedioso de limpiar_. 
+_Cuando usas el modo `hardlink` (predeterminado), borrar un archivo de tu biblioteca no lo borra físicamente del disco si aún existe en la carpeta `Incoming` (y viceversa). Esto es necesario para seguir compartiendo (_Seeding_) como cliente eMule (y ganar créditos en la red), pero puede ser tedioso de limpiar_. 
 
 Para facilitar la limpieza total, SmartMule incluye un comando de purga/eliminación de archivos:
 
 *   **Purga Selectiva**: Busca archivos por nombre, comodines (_Wildcards_) o expresiones regulares (_Regex_). 
     ```bash
     python main.py --purge "nombre*"  # Encuentra archivos que empiecen por "nombre"
-    python main.py --purge ".*\.mkv$" # Encuentra todos los archivos con extensión .mkv
+    python main.py --purge "\.mkv$" # Encuentra todos los archivos con extensión .mkv
     ```
 
 *   **Explorador Interactivo**: Si ejecutas el comando sin términos de búsqueda, SmartMule te mostrará la lista completa de tu biblioteca para que elijas qué eliminar.
@@ -243,23 +263,24 @@ Para no perder visibilidad en la red ni dejar de ganar créditos tras la organiz
 
 ---
 
-## Configuración para Torrents (BitTorrent, uTorrent, qBittorrent)
+## 🧲 Configuración para Torrents (BitTorrent, uTorrent, qBittorrent)
 
-SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a que las redes Torrent detienen el *seeding* (compartir) si cambias el archivo de sitio, SmartMule usa por defecto la creación de **Hardlinks** para los archivos de estas redes, asegurando que puedas seguir compartiendo (_Seeding_) los archivos sin interrupciones.
+SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a que las redes Torrent detienen el *Seeding* (compartición de archivos) si cambias el archivo de sitio, SmartMule usa por defecto la creación de **Hardlinks** para los archivos de estas redes, asegurando que puedas seguir compartiendo (_Seeding_) los archivos sin interrupciones.
 
-1.  **Ajustes de Extensiones (Crucial)**: Para prevenir que SmartMule procese archivos sin terminar, es obligatorio que actives la opción de de tu cliente de Torrent para agregar una extensión a las descargas incompletas. (Ej. *`Append .!ut to incomplete files`* en uTorrent o *`Añadir !qB a descargas incompletas`* en qBittorrent).
+1.  **Ajustes de Extensiones [OBLIGATORIO]**: Para prevenir que SmartMule procese archivos sin terminar, es **imprescindible** que actives la opción de tu cliente de Torrent para agregar una extensión a las descargas incompletas. (Ej. *`Append .!ut to incomplete files`* en uTorrent o *`Añadir !qB a descargas incompletas`* en qBittorrent). Esto evita que el sistema intente indexar archivos parciales.
 
     ![alt text](images/torrent_conf.png)
 
-2.  **Mismo Disco**: Los _Hardlinks_ exigen que la carpeta `Incoming` y la `Library` estén en la misma partición del sistema o disco duro.
+2.  **Mismo Disco [RECOMENDADO]**: Para una eficiencia máxima de espacio, se recomienda que la carpeta `Incoming` y la `Library` estén en la misma partición. Esto permite usar _Hardlinks_ (no ocupa espacio adicional). 
+    *   *Nota*: Si las carpetas están en discos distintos, SmartMule lo detectará y realizará una **copia automática** (_fallback_), pero esto duplicará el espacio usado.
 
-3.  **Configuración de Modo**: Puedes alterar el comportamiento modificando la variable `ORGANIZER_MODE` en tu `.env` (`hardlink` por defecto, pudiendo elegir `copy` o `move`).
+3.  **Configuración de Modo [OPCIONAL]**: Por defecto SmartMule trabaja en modo `hardlink`. Puedes forzar que siempre use copias o movimientos modificando la variable `ORGANIZER_MODE` en tu archivo `.env`.
 
 ---
 
 ## Testing
 
-SmartMule cuenta con una suite de pruebas para garantizar la estabilidad:
+SmartMule cuenta con una suite de pruebas para garantizar la estabilidad. Puedes lanzarla con el comando:
 ```bash
 pytest -v --tb=short
 ```

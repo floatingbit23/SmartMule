@@ -73,6 +73,11 @@ The `smartmule/queue_manager.py` uses a single worker thread and a **Deferred Cl
 - **Cross-Device Fallback**: The organizer detects `EXDEV` (cross-partition) errors and automatically falls back from `hardlink` to `copy` if necessary.
 - **Fast Watcher**: Directory inspection uses shallow `iterdir()` instead of recursive `rglob` to avoid blocking the OS event observer.
 
+### Key Logic: P2P Metadata Handling
+SmartMule treats P2P operational files (`.torrent`, `.emulecollection`) as valuable but non-media assets.
+- **Categorization**: These extensions are mapped to the `info` category in `regex_parser.py`.
+- **Organization**: They are automatically moved to the `Library/Info` (or `Library/Metadata`) subfolder to keep the main media directories clean while preserving the download source information.
+
 ---
 
 ## 🧪 Testing & Validation

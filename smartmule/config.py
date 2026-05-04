@@ -88,7 +88,7 @@ IGNORED_EXTENSIONS: set = {
     ".part.met.bak",  # Backup de los metadatos
     ".tmp",           # Archivos temporales genéricos
     ".!ut",           # Temporal de uTorrent
-    ".!qb",           # Temporal de qBittorrent
+    ".!qB",           # Temporal de qBittorrent
     ".bc!",           # Temporal de BitComet
     ".az!",           # Temporal de Vuze/Azureus
 }

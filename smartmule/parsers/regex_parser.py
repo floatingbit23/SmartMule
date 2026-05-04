@@ -13,7 +13,7 @@ EXTENSION_MAPPING = {
     "audio": {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".opus", ".wma", ".m4b", ".ape", ".mpc", ".wv"}, # Audio/Música
     "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".raw", ".svg", ".ico"}, # Imágenes
     "documents": {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".odt", ".ods", ".odp"}, # Documentos
-    "info": {".nfo", ".sfv", ".md5", ".sha1"} # Información y Verificación de la Escena
+    "info": {".nfo", ".sfv", ".md5", ".sha1", ".emulecollection", ".torrent"} # Información, Colecciones y Metadatos P2P
 }
 
 # Mapa de normalización de idiomas (Alias -> Código Estándar)
@@ -400,7 +400,7 @@ def parse_filename(filename: str) -> dict:
         else:
             result["confidence"] = "low"
         
-    if result["media_type"] in ["book", "software", "audio"]:
+    if result["media_type"] in ["book", "software", "audio", "info", "subtitles"]:
         result["confidence"] = "high"
         
     return result

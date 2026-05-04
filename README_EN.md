@@ -4,7 +4,7 @@
 
 ### The Intelligent Librarian for the P2P Ecosystem
 
-**SmartMule** is an automated organization and security service designed to transform the chaos of P2P downloads (eMule, aMule, etc.) into a perfectly structured library. It uses file system monitoring, cryptographic hashing (ED2K), and Artificial Intelligence to classify, clean, and protect your computer from disguised threats.
+**SmartMule** is an automated organization and security service designed to transform the chaos of P2P downloads (eMule, aMule, Torrent clients, etc.) into a perfectly structured library. It uses file system monitoring, cryptographic hashing (ED2K), and Artificial Intelligence (_Small Language Models_) to classify, clean, and protect your computer from disguised threats.
 
 ![SmartMule](/images/SmartMule_Logo_Oficial.png)
 
@@ -22,13 +22,33 @@ By default, eMule places all completed downloads into a single `Incoming` folder
 
 ---
 
+## 📂 Library Structure
+
+SmartMule organizes your files into the following automatic categories within your `Library` folder:
+
+| Category | Folder | Description |
+| :--- | :--- | :--- |
+| 🎬 **Movies & TV** | `Movies_and_Series` | Movies and TV series episodes (MKV, MP4, AVI, etc.). |
+| 🎵 **Music** | `Music` | Albums and audio tracks (MP3, FLAC, OGG, etc.). |
+| 📚 **Books** | `Books` | eBooks, comics, and technical documents (PDF, EPUB, CBR, etc.). |
+| 💾 **Software** | `Software` | Programs and installers (EXE, MSI, APK, etc.). |
+| 📄 **Information** | `Information` | P2P metadata (`.torrent`, `.emulecollection`), `.nfo`, and `.md5` files. |
+| 📦 **Compressed** | `Compressed` | ZIP, RAR, or 7Z archives not containing clear media. |
+| 🖼️ **Images** | `Images` | Photos and graphic material (JPG, PNG, WEBP, etc.). |
+| 📝 **Documents** | `Documents` | Text and office files (DOCX, XLSX, TXT, etc.). |
+| 📁 **Other** | `Other` | Files that could not be automatically categorized. |
+| 🛡️ **Quarantine** | `00_Quarantine` | Highly suspicious or detected malicious files by the antimalware system. |
+| 🔍 **Review** | `01_Review` | Files requiring manual intervention for classification. |
+
 ## Key Features
 
 *   **Active Surveillance (Watchdog)**: Instantly detects new files in your `Incoming` folder.
 
 *   **Dual-Layer Verification**: Identifies files by name (AI) and by content (ED2K Hash / Fingerprint). 
 
-*   **Folder Grouping Support**: SmartMule detects if a download is a folder (e.g., a movie with subtitles). It identifies the main file for hashing and metadata but moves and renames the **entire folder** as a single functional unit.
+*   **Metadata and Grouping Support**: SmartMule detects if a download is a folder (e.g., a movie with subtitles). It identifies the main file for hashing but moves the **entire folder**.
+
+    Additionally, it automatically organizes operational files like **eMule Collections (`.emulecollection`)** and **`.torrent`** files into the `Information` category.
 
 *   **Semantic Antimalware (Elite Triage)**: Deep file inspection without extraction using **VirusTotal**. SmartMule trusts no one:
     -   **Macro Analysis**: Detects Office documents with macros (`.xlsm`, `.docm`, etc.) and legacy formats (`.doc`, `.xls`), treating them as executables for preventive triage.
@@ -196,7 +216,7 @@ To facilitate complete cleanup, SmartMule includes a purge command:
 *   **Selective Purge**: Search for files by name, _Wildcards_, or _Regex_.
     ```bash
     python main.py --purge "name*"     # Finds files starting with "name"
-    python main.py --purge ".*\.mkv$"  # Finds all .mkv files
+    python main.py --purge "\.mkv$"  # Finds all .mkv files
     ```
 
 *   **Interactive Explorer**: If you run the command without search terms, SmartMule will display the full list of your library for you to choose what to delete.
@@ -247,23 +267,24 @@ To maintain visibility on the network and continue earning credits after organiz
 
 ---
 
-## Torrent Configuration (BitTorrent, uTorrent, qBittorrent)
+## 🧲 Torrent Configuration (BitTorrent, uTorrent, qBittorrent)
 
-SmartMule is fully compatible with Torrent download managers. Because Torrent networks stop *seeding* (sharing) if you change the file's location, SmartMule defaults to creating **Hardlinks** for files coming from these networks, ensuring that you can continue sharing (_Seeding_) the files without interruptions.
+SmartMule is fully compatible with Torrent download managers. Because Torrent networks stop *Seeding* (file sharing) if you change the file's location, SmartMule defaults to creating **Hardlinks** for files coming from these networks, ensuring that you can continue sharing (_Seeding_) the files without interruptions.
 
-1.  **Extensions Settings (Crucial)**: To prevent SmartMule from processing unfinished files, it is mandatory that you enable the option in your Torrent client to add an extension to incomplete downloads. (e.g. *`Append .!ut to incomplete files`* in uTorrent or *`Append .!qB to incomplete files`* in qBittorrent).
+1.  **Extensions Settings [MANDATORY]**: To prevent SmartMule from processing unfinished files, it is **essential** that you enable the option in your Torrent client to add an extension to incomplete downloads. (e.g. *`Append .!ut to incomplete files`* in uTorrent or *`Append .!qB to incomplete files`* in qBittorrent). This prevents the system from trying to index partial files.
 
     ![alt text](images/torrent_conf.png)
 
-2.  **Same Drive**: _Hardlinks_ require that both the `Incoming` folder and the `Library` folder reside on the same system partition or hard drive.
+2.  **Same Drive [RECOMMENDED]**: For maximum space efficiency, it is recommended that both the `Incoming` and `Library` folders reside on the same partition. This allows the use of _Hardlinks_ (zero extra space).
+    *   *Note*: If the folders are on different drives, SmartMule will detect it and perform an **automatic copy** (_fallback_), but this will double the used space.
 
-3.  **Mode configuration**: You can alter the behavior by modifying the `ORGANIZER_MODE` variable in your `.env` (`hardlink` by default, but you can choose `copy` or `move`).
+3.  **Mode Configuration [OPTIONAL]**: By default, SmartMule uses `hardlink` mode. You can force it to always use copies or moves by modifying the `ORGANIZER_MODE` variable in your `.env` file.
 
 ---
 
 ## Testing
 
-Full test suite to ensure stability:
+Full test suite to ensure stability. Execute it with:
 ```bash
 pytest -v --tb=short
 ```

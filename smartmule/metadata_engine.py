@@ -193,14 +193,20 @@ class MetadataEngine:
             ai_data["languages"] = data.get("languages", "")
             ai_data["subtitles"] = data.get("subtitles", "")
             
-            # Si el tipo de medio es desconocido, se usa el tipo de medio que asignó Regex
-            if not ai_data.get("media_type") or ai_data.get("media_type") == "unknown":
+            # Blindaje de categoría: Si Regex detectó un tipo de medio fuerte (info (.emulecollections, .torrent), subs (.srt), software) o la IA falló, respetamos el media_type original
+            strong_types = ["info", "subtitles", "software"]
+
+            # Si el Regex detectó un "tipo de medio fuerte"
+            if (data.get("media_type") in strong_types or 
+                not ai_data.get("media_type") or  # O la IA no pudo determinar un tipo de medio
+                ai_data.get("media_type") == "unknown"): # O la IA no pudo determinar un tipo de medio
                 ai_data["media_type"] = data.get("media_type")
                 
             ai_data["_ai_used"] = True
             return ai_data
+
         else:
-            logger.warning("[ERROR] Análisis por IA falló. Volviendo al resultado de Regex...")
+            logger.warning("[ERROR] El análisis por IA falló. Volviendo al resultado de Regex...")
             return data
 
 

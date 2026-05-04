@@ -179,6 +179,7 @@ class HashDatabase:
         # Habilito funciones personalizadas para el motor de búsqueda
         self._conn.create_function("REGEXP", 2, self._regexp_worker) # REGEX
         self._conn.create_function("levenshtein", 2, self._levenshtein_distance) # FUZZY SEARCH (ÚLTIMO RECURSO)
+        self._conn.create_function("levenshtein_word", 2, self._levenshtein_word_worker) # FUZZY POR PALABRAS
         self._conn.create_function("stem", 1, lambda x: Path(x).stem if x else "") # Eliminar extensiones
 
 
@@ -293,6 +294,30 @@ class HashDatabase:
             previous_row = current_row
         
         return previous_row[-1]
+
+    # FALLBACK A PALABRAS SUELTAS
+
+    def _levenshtein_word_worker(self, full_text: str, query: str) -> int:
+        """
+        Calcula la distancia de Levenshtein mínima entre una consulta y las palabras individuales de un texto. 
+        Útil para encontrar palabras sueltas en titulos de varias palabras.
+
+        Ejemplo: Buscar "Knifes" y poder encontrar la película "Knives Out" (aunque sea una sola palabra la que coincide)
+        """
+
+        # Si falta texto o consulta, devolvemos distancia muy alta (99)
+        if not full_text or not query:
+            return 99
+        
+        # Limpiamos el texto de separadores comunes y dividimos
+        clean_text = full_text.replace('.', ' ').replace('-', ' ').replace('_', ' ').replace('(', ' ').replace(')', ' ')
+        words = clean_text.split()
+        
+        if not words:
+            return 99
+            
+        # Devolvemos la distancia de la palabra que más se parezca
+        return min(self._levenshtein_distance(w, query) for w in words)
 
 
     # Función de búsqueda por hash ED2K
@@ -621,31 +646,42 @@ class HashDatabase:
     def _search_fuzzy(self, query: str, filter_conditions: list = None, filter_params: list = None, max_distance: int = 2) -> list[dict]:
        
         """
-        Búsqueda difusa como último recurso contra errores tipográficos (typos).
-        Calcula la distancia de Levenshtein entre el query y los títulos.
-
-        La función levenshtein(a, b) calcula cuántas letras necesitas cambiar, añadir o borrar para transformar "a" en "b".
-        La función stem() elimina la extensión del archivo para tratar "matrix.mkv" como "matrix".
+        Fuzzy Search inteligente. 
+        Soporta tanto coincidencias de títulos completos como de palabras individuales (fragmentos).
         """
 
-        # SQL que calcula la distancia de Levenshtein mínima entre el nombre de archivo (sin extensión) y el título oficial
-        # Filtrado por longitud de cadena: solo evaluamos registros cuyo nombre sea de tamaño similar (+/- 3 caracteres).
+        # Parámetros para el filtro de longitud
         min_len = max(0, len(query) - 3)
         max_len = len(query) + 3
-
-        """
-        SQLite ejecutará la función Levenshtein en Python solo sobre los registros que tienen una longitud de nombre similar al término de búsqueda (margen de +/- 3 caracteres). 
-        Esto convierte una búsqueda costosa de O(N) en una operación filtrada extremadamente rápida de O(filtrado), ideal para bibliotecas con miles de archivos.
-        """
+        
+        # Si el query es una sola palabra, somos más permisivos con la longitud del título, ya que buscamos una coincidencia de fragmento (levenshtein_word).
+        is_single_word = " " not in query.strip()
 
         sql = """
             SELECT *, 
-                   MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) as dist
+                   MIN(
+                       levenshtein(stem(file_name), ?), 
+                       levenshtein(official_title, ?),
+                       levenshtein_word(official_title, ?),
+                       levenshtein_word(stem(file_name), ?)
+                   ) as dist
             FROM files 
-            WHERE (LENGTH(stem(file_name)) BETWEEN ? AND ? OR LENGTH(official_title) BETWEEN ? AND ?)
-              AND MIN(levenshtein(stem(file_name), ?), levenshtein(official_title, ?)) <= ?
+            WHERE (
+                -- Coincidencia de longitud total (para títulos completos similares)
+                (LENGTH(stem(file_name)) BETWEEN ? AND ? OR LENGTH(official_title) BETWEEN ? AND ?)
+                OR 
+                -- Coincidencia de fragmento (solo si es una palabra única y el título es más largo)
+                (? = 1 AND (LENGTH(stem(file_name)) >= ? OR LENGTH(official_title) >= ?))
+            )
+            AND dist <= ?
         """
-        all_params = [query, query, min_len, max_len, min_len, max_len, query, query, max_distance]
+        
+        all_params = [
+            query, query, query, query, # Para el cálculo de distancias
+            min_len, max_len, min_len, max_len, # Para el filtro de longitud total
+            1 if is_single_word else 0, len(query), len(query), # Para el filtro de fragmento
+            max_distance # Distancia máxima permitida
+        ]
 
         if filter_conditions:
             for cond in filter_conditions:
@@ -658,7 +694,7 @@ class HashDatabase:
             cursor = self._conn.execute(sql, tuple(all_params))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"[ERR]  Error en búsqueda difusa para '{query}': {e}")
+            logger.error(f"[ERR]  Error en búsqueda inteligente para '{query}': {e}")
             return []
 
 
