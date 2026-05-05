@@ -201,15 +201,21 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
 
     ![alt text](/images/logs.png)
 
-*   **Inventario y Estadísticas**: Para ver rápidamente qué archivos están registrados en la biblioteca, el desglose por categorías (Películas, Libros, etc.) y el tamaño total ocupado, usa el flag `--stats`. Para verificar el estado de salud y dependencias del sistema, usa `--status`. Si quieres verificar qué rutas y APIs tienes activas, usa `--config`:
-    ```bash
-    smartmule --stats     # Ver estadísticas
-    smartmule --status    # Chequear salud del sistema
-    smartmule --config    # Ver configuración activa
-    ```
+*   **Inventario y Estadísticas**: 
+
+    Para ver rápidamente qué archivos están registrados en la biblioteca, el desglose detallado por categorías (con su correspondiente espacio en GB/MB) y el tamaño total ocupado, usa el flag `--stats`. 
 
     ![alt text](/images/inventory.png)
 
+
+    Para verificar el estado de salud y dependencias del sistema, usa `--status`. 
+
+    > Imagen pendiente...
+
+
+    Para verificar qué rutas y APIs tienes activas, usa `--config`:
+
+    ![alt text](/images/config.png)
 
 ---
 

@@ -60,7 +60,7 @@ The ED2K hashing in `smartmule/hasher.py` uses a hybrid model:
 
 ### Key Logic: Database Concurrency (WAL Mode)
 SmartMule uses **SQLite Write-Ahead Logging (WAL)** to allow concurrent read and write operations.
-- **Benefit**: You can perform `--search` or `--stats` queries from the CLI while the background daemon is writing new records without encountering `database is locked` errors.
+- **Benefit**: You can perform `--search` or `--stats` (which provides breakdown by files and space per category in GB/MB) queries from the CLI while the background daemon is writing new records without encountering `database is locked` errors.
 - **Sync Mode**: Set to `NORMAL` for a balance between safety and performance.
 
 ### Key Logic: Resource-Efficient Queue

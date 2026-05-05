@@ -204,13 +204,21 @@ SmartMule is designed to run once and remain monitoring permanently in a complet
     ```
     ![alt text](/images/logs.png)
 
-*   **Inventory and Statistics**: To quickly see which files are registered in the library, the breakdown by category, and the total storage used, use the `--stats` flag. To check system health and dependencies, use `--status`. To check your active paths and APIs, use `--config`:
-    ```bash
-    smartmule --stats     # View statistics
-    smartmule --status    # Check system health
-    smartmule --config    # View active configuration
-    ```
+*   **Inventory and Statistics**: 
+
+    To quickly see which files are registered in the library, a detailed breakdown by category (including space used in GB/MB), and the total storage used, use the `--stats` flag. 
+
     ![alt text](/images/inventory.png)
+
+
+    To check system health and dependencies, use `--status`. 
+
+    > Pending image...
+
+    To check your active paths and APIs, use `--config`:
+
+    ![alt text](/images/config.png)
+
 
 *   **Intelligent Search**: To quickly locate any file by its official title or original name, use the `--search` flag. The FTS5 engine allows for fast and accent-insensitive searches:
     ```bash

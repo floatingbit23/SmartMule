@@ -532,7 +532,7 @@ def show_stats() -> None:
     db = HashDatabase(DB_PATH)
     try:
         stats = db.get_stats()
-        files = db.get_all_files()
+        files = db.get_all_files(order_by_size=True)
 
         print("\n===================================================")
         print("          SmartMule: Inventario de Biblioteca")
@@ -551,6 +551,20 @@ def show_stats() -> None:
             "unknown": "❓"
         }
 
+        # Función auxiliar para formatear tamaños de forma legible (GB, MB, KB o Bytes)
+        def format_size(bytes_size: float) -> str:
+            if bytes_size >= 1024**3:
+                val = f"{bytes_size / (1024**3):.2f}"
+                return f"{val.replace('.', ',')} GB"
+            elif bytes_size >= 1024**2:
+                val = f"{bytes_size / (1024**2):.2f}"
+                return f"{val.replace('.', ',')} MB"
+            elif bytes_size >= 1024:
+                val = int(bytes_size / 1024)
+                return f"{val} KB"
+            else:
+                return f"{int(bytes_size)} B"
+
         if not files:
             print("\n[i] La biblioteca está vacía.")
         else:
@@ -563,20 +577,41 @@ def show_stats() -> None:
                 if len(title) > 60:
                     title = title[:57] + "..."
                 
-                print(f" {icon} {title}")
+                size_str = format_size(f.get("file_size", 0))
+                print(f" {icon} {title} ({size_str})")
 
         print("\n---------------------------------------------------")
         print(f"  📊 Total de archivos: {stats['total']}")
         
-        # Calculamos el tamaño total en GB (Bytes / 1024^3)
-        total_gb = stats.get("total_size", 0) / (1024**3)
-        print(f"  💾 Espacio total organizado: {total_gb:.2f} GB")
+        # Tamaño total con unidad principal y sub-unidad
+        total_bytes = stats.get("total_size", 0)
+        main_size_str = format_size(total_bytes)
         
+        # Determinamos la sub-unidad para el paréntesis
+        if total_bytes >= 1024**3: # Si es GB, mostramos MB
+            sub_val = f"{total_bytes / (1024**2):.2f}"
+            sub_size_str = f"{sub_val.replace('.', ',')} MB"
+            print(f"  💾 Espacio total organizado: {main_size_str} ({sub_size_str})")
+
+        elif total_bytes >= 1024**2: # Si es MB, mostramos KB
+            sub_val = f"{total_bytes / 1024:.2f}"
+            sub_size_str = f"{sub_val.replace('.', ',')} KB"
+            print(f"  💾 Espacio total organizado: {main_size_str} ({sub_size_str})")
+
+        else: # Para KB o Bytes, no mostramos sub-unidad o mostramos bytes
+            print(f"  💾 Espacio total organizado: {main_size_str}")
+        
+        # Desglose por categorías
         if stats["categories"]:
+            
             print("  📂 Desglose por categorías:")
+
             for cat, count in stats["categories"].items():
                 icon = CATEGORY_ICONS.get(cat, "❓")
-                print(f"     {icon} {cat.capitalize()}: {count}")
+
+                # Tamaño por categoría dinámico
+                cat_bytes = stats["category_sizes"].get(cat, 0)
+                print(f"     {icon} {cat.capitalize()}: {count} ({format_size(cat_bytes)})")
         
         print("===================================================\n")
 

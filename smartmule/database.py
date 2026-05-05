@@ -860,13 +860,18 @@ class HashDatabase:
 
 
     # Función para obtener todos los registros (para el flag --list)
-    def get_all_files(self) -> list[dict]:
+    def get_all_files(self, order_by_size: bool = False) -> list[dict]:
 
         """
-        Devuelve todos los archivos registrados en la base de datos, ordenados por fecha de procesamiento (los más recientes primero).
+        Devuelve todos los archivos registrados en la base de datos.
+        Por defecto los ordena por fecha de procesamiento (recientes primero), pero permite ordenar por tamaño.
         """
 
-        sql = "SELECT * FROM files ORDER BY processed_at DESC"
+        if order_by_size:
+            sql = "SELECT * FROM files ORDER BY file_size DESC"
+        else:
+            sql = "SELECT * FROM files ORDER BY processed_at DESC"
+            
         cursor = self._conn.execute(sql)
         return [dict(row) for row in cursor.fetchall()]
 
@@ -881,7 +886,8 @@ class HashDatabase:
         stats = {
             "total": 0,
             "total_size": 0,
-            "categories": {}
+            "categories": {},
+            "category_sizes": {}
         }
 
         try:
@@ -891,10 +897,11 @@ class HashDatabase:
             stats["total"] = row[0]
             stats["total_size"] = row[1] or 0
 
-            # 2. Obtener conteo por categoría
-            cursor = self._conn.execute("SELECT media_type, COUNT(*) FROM files GROUP BY media_type ORDER BY COUNT(*) DESC")
+            # 2. Obtener conteo y tamaño por categoría
+            cursor = self._conn.execute("SELECT media_type, COUNT(*), SUM(file_size) FROM files GROUP BY media_type ORDER BY COUNT(*) DESC")
             for row in cursor.fetchall():
                 stats["categories"][row[0]] = row[1]
+                stats["category_sizes"][row[0]] = row[2] or 0
             
         except Exception as e:
             logger.error(f"[ERR]  Error al obtener estadísticas de la BBDD: {e}")
