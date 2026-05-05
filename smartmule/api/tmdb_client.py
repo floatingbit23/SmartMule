@@ -126,19 +126,53 @@ class TMDBClient:
         return []
 
     # Función para obtener los detalles completos de una película
-    def get_movie_details(self, movie_id: int) -> Optional[dict]:
+    def get_movie_details(self, movie_id: int, language: str = "es-ES") -> Optional[dict]:
 
         """Obtiene los detalles completos de una película, incluyendo runtime."""
 
-        # En español por defecto
-        params = {"language": "es-ES"}
+        params = {"language": language}
         return self._get(f"/movie/{movie_id}", params)
 
     # Función para obtener los detalles completos de una serie
-    def get_tv_details(self, tv_id: int) -> Optional[dict]:
+    def get_tv_details(self, tv_id: int, language: str = "es-ES") -> Optional[dict]:
 
         """Obtiene los detalles completos de una serie, incluyendo episode_run_time."""
 
-        # En español por defecto
-        params = {"language": "es-ES"}
+        params = {"language": language}
         return self._get(f"/tv/{tv_id}", params)
+
+    # Mapeo de géneros de TMDB (IDs a nombres bilingües ES | EN)
+    _GENRE_MAP = {
+        12: "Aventura | Adventure", 
+        14: "Fantasía | Fantasy", 
+        16: "Animación | Animation",
+        18: "Drama | Drama", 
+        27: "Terror | Horror", 
+        28: "Acción | Action",
+        35: "Comedia | Comedy", 
+        36: "Historia | History", 
+        37: "Western | Western",
+        53: "Suspense | Thriller", 
+        80: "Crimen | Crime", 
+        99: "Documental | Documentary",
+        878: "Ciencia ficción | Science Fiction", 
+        9648: "Misterio | Mystery",
+        10402: "Música | Music", 
+        10749: "Romance | Romance", 
+        10751: "Familia | Family",
+        10752: "Bélica | War", 
+        10759: "Acción y Aventura | Action & Adventure",
+        10762: "Infantil | Kids", 
+        10763: "Noticias | News", 
+        10764: "Reality | Reality",
+        10765: "Ciencia ficción y Fantasía | Sci-Fi & Fantasy", 
+        10766: "Culebrón | Soap",
+        10767: "Entrevista | Talk", 
+        10768: "Guerra y Política | War & Politics",
+        10770: "Película de TV | TV Movie"
+    }
+
+    def get_genre_names(self, genre_ids: list) -> str:
+        """Mapea IDs de género a nombres bilingües de forma instantánea."""
+        names = [self._GENRE_MAP.get(gid) for gid in genre_ids if self._GENRE_MAP.get(gid)]
+        return ", ".join(names)

@@ -69,7 +69,10 @@ class HashDatabase:
             vt_url TEXT DEFAULT '', -- URL del informe de VirusTotal
             final_path TEXT DEFAULT '', -- Ruta final del archivo
             is_organized INTEGER DEFAULT 0, -- Por defecto: no organizado=0, organizado=1 
-            duration INTEGER DEFAULT 0 -- Duración en segundos (extraída por FFmpeg)
+            duration INTEGER DEFAULT 0, -- Duración en segundos (extraída por FFmpeg)
+            overview TEXT DEFAULT '', -- Sinopsis/Resumen (TMDB)
+            overview_en TEXT DEFAULT '', -- Sinopsis/Resumen en inglés (TMDB)
+            genres TEXT DEFAULT '' -- Géneros (TMDB/MusicBrainz)
         );
     """
 
@@ -95,6 +98,9 @@ class HashDatabase:
             official_title,
             author,
             languages,
+            overview,
+            overview_en,
+            genres,
             content='files',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
@@ -104,24 +110,24 @@ class HashDatabase:
     # Triggers para sincronización automática en tiempo real
     _CREATE_TRIGGER_AI_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres);
         END;
     """
 
     _CREATE_TRIGGER_AD_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres);
         END;
     """
 
     _CREATE_TRIGGER_AU_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages);
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres);
         END;
     """
 
@@ -142,7 +148,10 @@ class HashDatabase:
         "ALTER TABLE files ADD COLUMN vt_url TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN final_path TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN is_organized INTEGER DEFAULT 0;",
-        "ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;"
+        "ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;",
+        "ALTER TABLE files ADD COLUMN overview TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN overview_en TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN genres TEXT DEFAULT '';"
     ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
@@ -214,8 +223,8 @@ class HashDatabase:
         if cursor.fetchone()[0] == 0:
 
             self._conn.execute("""
-                INSERT INTO files_fts(rowid, file_name, official_title, author, languages)
-                SELECT id, file_name, official_title, author, languages FROM files
+                INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres)
+                SELECT id, file_name, official_title, author, languages, overview, overview_en, genres FROM files
             """)
 
             self._conn.commit()
@@ -488,6 +497,7 @@ class HashDatabase:
             r"res:(\S+)":        lambda m: ("resolution", "LIKE ?", f"{m.group(1)}%", False),
             r"organized:(\S+)":  organized_handler,
             r"added:(\d+d|today)": date_handler,
+            r"genre:(\S+)":      lambda m: ("genres", "LIKE ?", f"%{m.group(1)}%", False),
         }
         
         # 2. Extracción de filtros
@@ -777,11 +787,12 @@ class HashDatabase:
             """
             UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, overview=?, overview_en=?, genres=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
-             resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, fingerprint, file_size)
+             resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, 
+             api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), fingerprint, file_size)
         )
 
         self._conn.commit()

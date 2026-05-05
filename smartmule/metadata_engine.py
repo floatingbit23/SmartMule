@@ -111,7 +111,7 @@ class MetadataEngine:
                     data.get("media_type") != orig_media or 
                     data.get("year") != orig_year):
 
-                    logger.info("[RETRY] Reintentando búsqueda con datos corregidos por IA...")
+                    logger.info(f"[RETRY] Reintentando búsqueda con datos corregidos por IA: '{data.get('title')}' ({data.get('media_type')})...")
                     self._enrich_with_apis(data, filename, technical_target)
 
         self._log_metadata_card(data)
@@ -165,8 +165,11 @@ class MetadataEngine:
         data = parse_filename(filename)
         data["_ai_used"] = False
         
-        # Si el análisis de Regex es de baja confianza, se aplica el análisis de IA.
-        if data.get("confidence") == "low":
+        # Capa 2: IA (Refuerzo si confianza es baja o si es un medio multilingüe (libro/audio))
+        is_low_confidence = data.get("confidence") == "low"
+        is_bilingual_media = data.get("media_type") in ["book", "audio"]
+
+        if is_low_confidence or is_bilingual_media:
             data = self._apply_ai_layer(filename, data)
             
         return data
@@ -277,7 +280,7 @@ class MetadataEngine:
             self._query_openlibrary(data, titulo_limpio)
 
         elif media_type == "audio":
-            self._query_musicbrainz(data, titulo_limpio)
+            self._query_musicbrainz(data, titulo_limpio, data.get("author"))
 
         elif media_type == "subtitles":
             logger.info("[SUBS] Subtítulos detectados.")
@@ -361,16 +364,20 @@ class MetadataEngine:
                     if res_id:
 
                         if data.get("season"):
-
-                            details = self.tmdb.get_tv_details(res_id)
+                            # Pedimos detalles en inglés para obtener runtime y sinopsis original
+                            details = self.tmdb.get_tv_details(res_id, language="en-US")
 
                             # En series, TMDB devuelve una lista de duraciones de episodio
                             durations = details.get("episode_run_time", [])
                             api_runtime = durations[0] if durations else 0
-
                         else:
-                            details = self.tmdb.get_movie_details(res_id)
+                            # Pedimos detalles en inglés para obtener runtime y sinopsis original
+                            details = self.tmdb.get_movie_details(res_id, language="en-US")
                             api_runtime = details.get("runtime", 0)
+
+                        # Guardamos la sinopsis en inglés en el objeto de resultado para usarla después
+                        if details:
+                            res["overview_en"] = details.get("overview")
                         
                         if api_runtime > 0:
 
@@ -399,6 +406,9 @@ class MetadataEngine:
             else:
                 data["media_type"] = "movie"
 
+            # Extraemos géneros bilingües usando el cliente
+            genres_str = self.tmdb.get_genre_names(api_result.get("genre_ids", []))
+
             # Guardamos los datos obtenidos de TMDB
             data["api_data"] = {
                 "source": "TMDB",
@@ -406,45 +416,177 @@ class MetadataEngine:
                 "date": api_result.get("first_air_date") or api_result.get("release_date"),
                 "score": api_result.get("vote_average"),
                 "poster_url": poster,
-                "overview": api_result.get("overview")
+                "overview": api_result.get("overview"),
+                "overview_en": api_result.get("overview_en"),
+                "genres": genres_str
             }
 
     
     # Función que realiza la búsqueda en OpenLibrary y aplica scoring.
     def _query_openlibrary(self, data: dict, titulo_limpio: str):
         logger.info("[BOOK] Buscando en OpenLibrary como Libro...")
-        api_result = self.openlibrary.search_book(titulo_limpio)
+        
+        original_title = data.get("original_title")
+        api_result = None
+        best_similitud = 0
+        
+        def _get_best_result(query: str):
+            res = self.openlibrary.search_book(query)
+            if res:
+                sim = SequenceMatcher(None, query.lower(), res.get("title", "").lower()).ratio()
+                return res, sim
+            return None, 0
 
-        if not api_result:
+        # Intento 1: Título Limpio (Español)
+        api_result, best_similitud = _get_best_result(titulo_limpio)
+        success = best_similitud >= 0.7
+        
+        # Intento 2: Título Original (IA / Inglés)
+        if not success and original_title:
+            logger.info(f"[BOOK] Similitud insuficiente con nombre en español. Probando título original IA: '{original_title}'...")
+            res_alt, sim_alt = _get_best_result(original_title)
+            if sim_alt > best_similitud:
+                api_result, best_similitud = res_alt, sim_alt
+                success = best_similitud >= 0.7
+
+        # Intento 3: Plan B (Limpieza AKA)
+        if not success:
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
             if titulo_alternativo:
-                logger.info(f"[RETRY] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
-                api_result = self.openlibrary.search_book(titulo_alternativo)
+                logger.info(f"[RETRY] Probando limpieza alternativa (sin AKA): '{titulo_alternativo}'")
+                res_alt, sim_alt = _get_best_result(titulo_alternativo)
+                if sim_alt > best_similitud:
+                    api_result, best_similitud = res_alt, sim_alt
 
         if api_result:
-            similitud = SequenceMatcher(None, titulo_limpio.lower(), api_result.get("title", "").lower()).ratio()
-            if similitud < 0.7:
-                logger.warning(f"[WARN] Libro descartado por baja similitud ({int(similitud*100)}%): '{api_result.get('title')}' vs '{titulo_limpio}'")
+            # Validación de Autor (Red de seguridad para títulos traducidos)
+            autor_ia = data.get("author", "").lower()
+            autores_api_lista = api_result.get("author_name", [])
+            autor_match = False
+            
+            if autor_ia and autores_api_lista:
+                for a_api in autores_api_lista:
+                    a_api_low = a_api.lower()
+                    if autor_ia in a_api_low or a_api_low in autor_ia:
+                        autor_match = True
+                        logger.info(f"[MATCH] Autor coincidente: '{a_api}'.")
+                        break
+                
+                if not autor_match:
+                    logger.info(f"[i] Comparando autores: IA='{autor_ia}' vs API={autores_api_lista}")
+
+            # Umbral dinámico: si el autor coincide, somos más flexibles con el título (60% en vez de 70%)
+            umbral_seguridad = 0.6 if autor_match else 0.7
+
+            if best_similitud < umbral_seguridad:
+                logger.warning("[WARN] Libro descartado por baja similitud (%d%%): '%s' vs consulta. Umbral requerido: %d%%", 
+                               int(best_similitud*100), api_result.get('title'), int(umbral_seguridad*100))
+                if autor_match:
+                    logger.info("[i] Nota: El autor coincidía, pero la diferencia de título sigue siendo excesiva.")
             else:
-                # --- MEJORA: Promoción de tipo oficial ---
+                if autor_match and best_similitud < 0.7:
+                    logger.info("[MATCH] Aceptando por autor coincidente (%d%% similitud).", int(best_similitud*100))
+                
+                # ÉXITO: Promoción y enriquecimiento
                 data["media_type"] = "book"
+
+                # --- MEJORA: Preferencia de Alfabeto Latino ---
+                def _is_latin(text: str) -> bool:
+                    if not text: return True
+                    # Comprueba si el texto contiene caracteres fuera del rango latino extendido
+                    return all(ord(c) < 0x0370 for c in text)
+
+                # Título
+                api_title = api_result.get("title")
+                if not _is_latin(api_title):
+                    if _is_latin(titulo_limpio):
+                        logger.info(f"[i] Título no latino. Manteniendo nombre limpio: '{titulo_limpio}'.")
+                        data["title"] = titulo_limpio
+                    elif original_title and _is_latin(original_title):
+                        logger.info(f"[i] Título y archivo no latinos. Usando Fallback Inglés (IA): '{original_title}'.")
+                        data["title"] = original_title
+                    else:
+                        data["title"] = api_title
+                else:
+                    data["title"] = api_title
+
+                # Autor
+                api_author = api_result.get("author_name_str")
+                if not _is_latin(api_author):
+                    # Intentamos buscar uno latino en la lista completa
+                    found_latin = False
+                    for alt_auth in api_result.get("author_name", []):
+                        if _is_latin(alt_auth):
+                            data["author"] = alt_auth
+                            found_latin = True
+                            logger.info(f"[i] Autor encontrado en API: '{alt_auth}'")
+                            break
+                    
+                    if not found_latin and autor_ia:
+                        # Si no hay ninguno en la API, usamos el de la IA (capitalizado)
+                        data["author"] = autor_ia.title()
+                        logger.info(f"[i] Usando nombre de autor normalizado por IA: '{data['author']}'")
+                else:
+                    data["author"] = api_author
+
+                # --- Fase de Enriquecimiento profundo (Sinopsis, Personajes, Lugares) ---
+                work_key = api_result.get("key")
+                details = self.openlibrary.get_book_details(work_key) if work_key else {}
+
+                # Combinamos temas, personajes y lugares para un índice de búsqueda ultra-rico
+                subjects = api_result.get("subject", [])[:5]
+                people = details.get("people", [])[:5]
+                places = details.get("places", [])[:5]
+                all_tags = list(dict.fromkeys(subjects + people + places)) # Eliminamos duplicados manteniendo orden
+                
+                genres_str = ", ".join(all_tags)
+
+                # Normalización de Score (OpenLibrary es rango 0-5 -> pasamos a rango 0-10)
+                raw_score = api_result.get("ratings_average", 0)
+                norm_score = round(raw_score * 2, 1) if raw_score else 0
+
+                # Resolución de fecha: Priorizar el año más antiguo entre API e IA (para libros clásicos)
+                api_year = api_result.get("first_publish_year")
+                llm_year = data.get("year")
+                final_year = api_year
+                
+                if llm_year and api_year:
+                    # Si la IA conoce un año más antiguo, es probable que la API devuelva una edición moderna
+                    if llm_year < api_year:
+                        final_year = llm_year
+                        logger.info(f"    [i] Corrigiendo año de edición ({api_year}) por año original ({llm_year})")
+                elif llm_year and not api_year:
+                    final_year = llm_year
+
+                # Extracción de páginas (Fallback entre mediana y lista de ediciones)
+                pages = api_result.get("number_of_pages_median")
+                
+                if not pages:
+                    # Si no hay mediana, buscamos en la lista de páginas (puede ser int o list en la API)
+                    raw_pages = api_result.get("number_of_pages")
+                    if isinstance(raw_pages, list) and raw_pages:
+                        pages = raw_pages[0] # Tomamos la primera edición como referencia
+                    elif isinstance(raw_pages, (int, float)):
+                        pages = int(raw_pages)
 
                 data["api_data"] = {
                     "source": "OpenLibrary",
-                    "official_title": api_result.get("title"),
-                    "author": api_result.get("author_name_str"),
-                    "date": api_result.get("first_publish_year"),
-                    "cover_id": api_result.get("cover_i"),
-                    "score": api_result.get("ratings_average")
+                    "official_title": data["title"],
+                    "author": data["author"],
+                    "date": final_year,
+                    "score": norm_score,
+                    "overview": details.get("description", ""),
+                    "genres": genres_str,
+                    "pages": pages
                 }
 
 
     # Función que realiza la búsqueda en MusicBrainz y aplica scoring.
-    def _query_musicbrainz(self, data: dict, titulo_limpio: str):
+    def _query_musicbrainz(self, data: dict, titulo_limpio: str, artist: Optional[str] = None):
 
         logger.info("[AUDIO] Buscando en MusicBrainz como Audio...")
 
-        api_result = self.musicbrainz.search_audio(titulo_limpio)
+        api_result = self.musicbrainz.search_audio(titulo_limpio, artist)
 
         if not api_result:
 
@@ -480,16 +622,48 @@ class MetadataEngine:
             
             # Si la similitud es alta o contiene el título, se guarda.
             else:
-                # --- MEJORA: Promoción de tipo oficial ---
+                # --- MEJORA: Promoción de tipo oficial y Normalización Latina ---
+                def _is_latin(text: str) -> bool:
+                    if not text: return True
+                    return all(ord(c) < 0x0370 for c in text)
+
+                # Título
+                api_title = api_result.get("title")
+                original_audio_title = data.get("original_title")
+
+                if not _is_latin(api_title):
+                    if _is_latin(titulo_limpio):
+                        data["title"] = titulo_limpio
+                    elif original_audio_title and _is_latin(original_audio_title):
+                        logger.info(f"[i] Audio no latino. Usando Fallback Inglés (IA): '{original_audio_title}'.")
+                        data["title"] = original_audio_title
+                    else:
+                        data["title"] = api_title
+                else:
+                    data["title"] = api_title
+
+                # Artista/Autor
+                api_artist = api_result.get("artist")
+                if not _is_latin(api_artist) and artist:
+                    data["author"] = artist.title()
+                    logger.info(f"[i] Artista en alfabeto no latino. Usando versión IA: '{data['author']}'")
+                else:
+                    data["author"] = api_artist
+
                 data["media_type"] = "audio"
 
                 data["api_data"] = {
                     "source": "MusicBrainz",
-                    "official_title": api_result.get("title"),
-                    "author": api_result.get("artist"),
+                    "official_title": data["title"],
+                    "author": data["author"],
                     "date": api_result.get("date"),
-                    "score": api_result.get("score") 
+                    "score": api_result.get("score", 0),  # MusicBrainz suele dar un score de match 0-100 o similar, lo mantenemos como está o ajustamos
+                    "genres": api_result.get("genres", "")
                 }
+                
+                # Si el score de MusicBrainz es de relevancia (rango 0-100), lo normalizamos a rango 0-10
+                if data["api_data"]["score"] > 10:
+                    data["api_data"]["score"] = round(data["api_data"]["score"] / 10, 1)
 
 
     # Función que realiza el triaje de seguridad del archivo.
@@ -605,15 +779,20 @@ class MetadataEngine:
                 logger.info(f"    - Autor/Artista: {ad['author']}")
 
             if ad.get("score"):
-                logger.info(f"    - Relevancia/Nota: {ad['score']}")
+                logger.info(f"    - Relevancia/Nota: {ad['score']}/10")
+
+            if ad.get("pages") and data.get("media_type") in ["book", "documents"]:
+                logger.info(f"    - Páginas: {ad['pages']}")
             
             # Información técnica complementaria (FFmpeg)
-            # Duración en minutos
             tech = data.get("technical")
+            
+            # Duración en minutos
             if tech and tech.get("duration_sec"):
                 mins = tech["duration_sec"] // 60
                 logger.info(f"    - Duración: {mins} min")
             
+            # Veredicto de seguridad
             if ad.get("veredicto"):
                 logger.info(f"    - Seguridad: {ad['veredicto']}")
 

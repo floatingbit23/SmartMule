@@ -55,20 +55,29 @@ class MusicBrainzClient:
             audio_data["album"] = "Sencillo/Desconocido"
             audio_data["date"] = None
         
+        # Géneros/Tags: Extraemos las etiquetas asociadas (si existen)
+        tags = recording.get("tags", [])
+        audio_data["genres"] = ", ".join([t.get("name") for t in tags if t.get("name")][:5])
+
         return audio_data
 
-    def search_audio(self, title: str) -> Optional[dict]:
+    def search_audio(self, title: str, artist: Optional[str] = None) -> Optional[dict]:
         """
-        Busca un track/canción en MusicBrainz usando el título limpio.
+        Busca un track/canción en MusicBrainz usando el título limpio y opcionalmente el artista.
         Implementa reintentos para mayor resiliencia ante fallos de red.
         """
 
         endpoint = "/recording"
-
         url = f"{MUSICBRAINZ_BASE_URL}{endpoint}"
 
+        # Construimos la query usando sintaxis Lucene para mayor precisión
+        if artist:
+            query = f'recording:"{title}" AND artist:"{artist}"'
+        else:
+            query = title
+
         params = {
-            "query": title,
+            "query": query,
             "fmt": "json",
             "limit": 1
         }

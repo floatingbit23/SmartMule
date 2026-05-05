@@ -121,7 +121,7 @@ VIRUSTOTAL_API_KEY: str = os.getenv("VIRUSTOTAL_API_KEY", "")
 VIRUSTOTAL_BASE_URL: str = "https://www.virustotal.com/api/v3"
 
 # Parámetros HTTP Generales
-API_TIMEOUT: int = 20  # Timeout en segundos para solicitudes HTTP
+API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "30"))  # Timeout en segundos para solicitudes HTTP
 
 # LLMs (IA)
 USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "True").lower() in ("true", "1", "yes")

@@ -1,7 +1,7 @@
 """
 TEST SUITE: MOTOR DE EXTRACCIÓN Y LIMPIEZA REGEX (METADATA PRECISION)
 
-Este suite valida la inteligencia del motor de parsing de SmartMule, encargado de 
+Este suite (GOLDEN SET) valida la inteligencia del motor de parsing de SmartMule, encargado de 
 convertir nombres de archivos "sucios" de redes P2P en metadatos limpios y estructurados.
 
 1. Limpieza de Títulos (Noise Removal):
@@ -253,3 +253,76 @@ def test_parse_nolan_variants():
     assert "Interstellar" in res4["title"]
     assert "Fantascienza" not in res4["title"]
     assert res4["year"] == 2014
+
+def test_parse_fight_club_axis_case():
+    """
+    Caso real detectado donde el ruido de uploader '-axis' y el dominio 'emulesonic.com' confundían a la API inicial.
+    """
+    filename = "El.club.de.la.lucha.(Fight.club).(David.Fincher,.1999).(Spanish.English.Subs).BDrip.1080p.x265-AC3.by.ana-axis.(emulesonic.com).mkv"
+    res = parse_filename(filename)
+    
+    # El título debe estar limpio de grupos y dominios
+    assert "El club de la lucha" in res["title"]
+    assert "Fight club" in res["title"]
+    assert "axis" not in res["title"]
+    assert "emulesonic" not in res["title"]
+    assert "by" not in res["title"]
+    assert res["year"] == 1999
+    assert res["quality"] == "1080p"
+
+def test_parse_weird_titles():
+    """
+    Test de 'Casos Raros' (Weird Titles).
+    Títulos que son solo números, leetspeak, títulos extremadamente largos o con delimitadores complejos.
+    """
+
+    # 1. Títulos que parecen años (Confusión con Year)
+    case1 = "1917.2019.1080p.BluRay.x264.mkv"
+    res1 = parse_filename(case1)
+    assert "1917" in res1["title"]
+    assert res1["year"] == 2019
+
+    case2 = "2012.2009.720p.BluRay.mkv"
+    res2 = parse_filename(case2)
+    assert "2012" in res2["title"]
+    assert res2["year"] == 2009
+
+    # 2. Leetspeak (Números integrados en palabras)
+    case3 = "Se7en.1995.BDRip.x264.mkv"
+    res3 = parse_filename(case3)
+    assert "Se7en" in res3["title"]
+    assert res3["year"] == 1995
+
+    case4 = "Thir13en.Ghosts.2001.720p.mkv"
+    res4 = parse_filename(case4)
+    assert "Thir13en Ghosts" in res4["title"]
+    assert res4["year"] == 2001
+
+    # 3. Títulos con números al principio y en medio
+    case5 = "2.Fast.2.Furious.2003.1080p.mkv"
+    res5 = parse_filename(case5)
+    assert "2 Fast 2 Furious" in res5["title"]
+
+    # 4. Títulos con delimitadores de puntos/guiones que son parte del título
+    case6 = "4.3.2.1.2010.1080p.mkv"
+    res6 = parse_filename(case6)
+    assert "4 3 2 1" in res6["title"]
+
+    case7 = "3-10.to.Yuma.2007.720p.mkv"
+    res7 = parse_filename(case7)
+    assert "3-10 to Yuma" in res7["title"]
+
+    # 5. Título extremadamente largo
+    long_title = "Night of the Day of the Dawn of the Son of the Bride of the Return of the Revenge of the Terror of the Attack of the Evil, Mutant, Hellbound, Flesh-Eating Subhumanoid Zombified Living Dead, Part 2"
+    case8 = f"{long_title} (1991).mkv"
+    res8 = parse_filename(case8)
+    # Verificamos que no se haya truncado agresivamente
+    assert "Night of the Day" in res8["title"]
+    assert "Zombified Living Dead" in res8["title"]
+    assert res8["year"] == 1991
+
+    # 6. Título con fracciones/números raros
+    case9 = "8.1.2.Federico.Fellini.1963.720p.mkv"
+    res9 = parse_filename(case9)
+    assert "8 1 2" in res9["title"]
+    assert "Federico Fellini" in res9["title"]

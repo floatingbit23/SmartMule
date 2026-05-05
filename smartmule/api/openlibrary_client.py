@@ -23,7 +23,12 @@ class OpenLibraryClient:
         self.min_delay = 0.35  # Tiempo mínimo entre peticiones (ligeramente > 1/3s)
 
     def _wait_for_rate_limit(self):
-        """Bloqueo síncrono para respetar los límites de la API de OpenLibrary."""
+
+        """
+        Bloqueo síncrono para respetar los límites de la API de OpenLibrary.
+        El límite es de (aprox.) 3 peticiones por segundo (3 req/s).
+        """
+
         now = time.time()
         time_since_last = now - self.last_request_time
         if time_since_last < self.min_delay:
@@ -40,7 +45,7 @@ class OpenLibraryClient:
         params = {
             "q": title,
             "limit": 1,
-            "fields": "title,author_name,first_publish_year,cover_i,key,subject,ratings_average"
+            "fields": "title,author_name,first_publish_year,cover_i,key,subject,ratings_average,number_of_pages_median,number_of_pages"
         }
 
         max_retries = 3
@@ -54,6 +59,7 @@ class OpenLibraryClient:
                     url, headers=self.headers, params=params, timeout=API_TIMEOUT
                 )
                 response.raise_for_status()
+                logger.info(f"[OK] Conexión establecida con OpenLibrary (HTTP {response.status_code})")
                 data = response.json()
                 
                 if data and "docs" in data and len(data["docs"]) > 0:
@@ -81,5 +87,46 @@ class OpenLibraryClient:
                 else:
                     logger.error(f"[ERR] Error definitivo conectando a OpenLibrary tras {max_retries} intentos: {e}")
                     return None
-        
         return None
+
+    def get_book_details(self, work_key: str) -> Optional[dict]:
+
+        """
+        Obtiene los detalles profundos de una obra (Work) usando su clave única.
+        Útil para conseguir la descripción, personajes y lugares.
+        """
+
+        if not work_key:
+            return None
+            
+        # Nos aseguramos de que la key tenga el formato correcto (sin el prefijo /works/ si ya lo trae)
+        work_id = work_key.replace("/works/", "")
+        url = f"{OPENLIBRARY_BASE_URL}/works/{work_id}.json"
+
+        self._wait_for_rate_limit()
+
+        try:
+            # Realizamos la petición GET con reintentos
+            response = requests.get(url, headers=self.headers, timeout=API_TIMEOUT)
+            response.raise_for_status()
+
+            # Convertimos la respuesta a JSON
+            data = response.json()
+            
+            # Limpiamos y normalizamos la descripción (puede venir como "string" o como "objeto" según el libro)
+            description = data.get("description", "")
+
+            # Si la descripción es un objeto, extraemos el valor
+            if isinstance(description, dict):
+                description = description.get("value", "")
+            
+            # Devolvemos los detalles de la obra
+            return {
+                "description": description,
+                "people": data.get("subject_people", []),
+                "places": data.get("subject_places", [])
+            }
+            
+        except Exception as e:
+            logger.error(f"[ERR] Error obteniendo detalles de obra {work_key}: {e}")
+            return None

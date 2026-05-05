@@ -19,18 +19,20 @@ Reglas:
 2. Elimina etiquetas de edición: Remastered, Remaster, V-A, Director's Cut, Extended, Uncut, etc. Estas NO son parte del título.
 3. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
 4. Detecta "season" y "episode" si es una serie. Usa números enteros.
-5. Identifica "year" si existe. Usa número entero.
-6. "media_type" debe ser exactamente uno de los siguientes strings: "video", "series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
-7. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
+5. Identifica "year" si existe. Usa número entero. Para libros, música y cine, proporciona el año de publicación/estreno original de la obra si lo conoces, aunque no esté en el nombre del archivo.
+6. Extrae el "author" o artista si está presente y es relevante.
+7. Si sospechas que la obra es una traducción o tiene un título original en inglés (muy común en libros y música), proporciona el "original_title" en inglés.
+8. "media_type" debe ser exactamente uno de los siguientes strings: "video", "series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
+9. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
 
 Ejemplo 1: "The.Office.S03E05.1080p.HEVC.x265.mkv"
-{"title": "The Office", "media_type": "series", "season": 3, "episode": 5, "quality": "1080p", "year": null}
+{"title": "The Office", "author": null, "original_title": null, "media_type": "series", "season": 3, "episode": 5, "quality": "1080p", "year": 2005}
 
-Ejemplo 2: "Age_of_Empires_II_Definitive_Edition-ISO-2019.rar"
-{"title": "Age of Empires II Definitive Edition", "media_type": "games", "season": null, "episode": null, "quality": null, "year": 2019}
+Ejemplo 2: "[Legendarium] Tolkien - El fin de la Tercera Edad.epub"
+{"title": "El fin de la Tercera Edad", "author": "J. R. R. Tolkien", "original_title": "The End of the Third Age", "media_type": "book", "season": null, "episode": null, "quality": null, "year": 1996}
 
-Ejemplo 3: "Manual_Usuario_SmartMule_v1.0_Final.doc"
-{"title": "Manual Usuario SmartMule v1.0 Final", "media_type": "documents", "season": null, "episode": null, "quality": null, "year": null}
+Ejemplo 3: "Manual_Usuario_v1.0.doc"
+{"title": "Manual Usuario v1.0", "author": null, "original_title": null, "media_type": "documents", "season": null, "episode": null, "quality": null, "year": null}
 """
 
 # Función principal que recibe el nombre y opcionalmente contexto técnico de Regex
@@ -76,7 +78,7 @@ def _call_gemini(filename: str, extra_context: str = "") -> dict:
             
             # Inferencia con salida JSON forzada, incluyendo el contexto técnico si existe
             response = client.models.generate_content(
-                model='gemini-2.5-flash', 
+                model='gemini-flash-latest', 
                 contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'{extra_context}", 
                 config={'response_mime_type': 'application/json'}
             )

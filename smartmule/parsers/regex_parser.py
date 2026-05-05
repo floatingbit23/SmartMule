@@ -56,6 +56,8 @@ SCENE_TAGS = [
     r"tommy", r"flights", r"phoenix", r"cmrg", r"ntg", r"sic", r"thefarm", r"xepa",
     r"amiable", r"rovers", r"strife", r"deflate", r"inflate", r"hdtim", r"hds", r"wiki",
     r"amiable", r"megusta", r"skytrooper", r"juggs", r"fgt", r"rarbg", r"yts",
+    r"utp", r"pahe", r"joy", r"galaxyrg", r"tgx", r"pix", r"ana-axis",
+    r"asap", r"lol", r"dimension", r"tue", r"eth",
     
     # Grupos Españoles y eMule (Scene ES)
     r"proteinicos", r"emulesonic", r"divxtotal", r"hispashare", r"elitetorrent",
@@ -63,11 +65,17 @@ SCENE_TAGS = [
     r"pax", r"abril", r"alies", r"ett", r"donkey", r"mule", r"olimp", r"btdx8",
     r"p73", r"armor", r"mokona", r"bone", r"bkk", r"micro", r"getb", r"istance",
     r"toy", r"foracrew", r"nahom", r"cnzoo", r"swtyblz", r"davide29", r"rodosky",
-    r"mmtraxx", r"syncup", r"juanito",
+    r"mmtraxx", r"syncup", r"juanito", r"animelliure", r"frozen-layer", r"animersion",
+    r"espa-mule", r"esp-mule", r"crg", r"llsw", r"unioncosplay", r"vampire", r"valhalla",
+    r"gran-torrent", r"mejordivx", r"morpheus", r"pgm", r"mks", r"pctfenix", r"newpct",
+    r"hd-spain", r"pixelados", r"emulepedia", r"p2p-spain", r"divx",
     
-    # Metadatos de Audio/Tech adicionales
+    # Metadatos de Audio/Tech adicionales y Ruido de Uploader
     r"kbps", r"320", r"192", r"128", r"vbr", r"cbr", r"ytshorts", r"savetube",
-    r"h\s*26[4-6]", r"x\s*26[4-6]", r"5\s*1", r"7\s*1", r"runneo", r"ddp?", r"dd\+", r"dovi", r"hdr\s*10"
+    r"h\s*26[4-6]", r"x\s*26[4-6]", r"5\s*1", r"7\s*1", r"runneo", r"ddp?", r"dd\+", r"dovi", r"hdr\s*10",
+    r"no-?logo-?ads?", r"no-?ads?", r"ads?",
+    r"by\.?[a-zA-Z0-9_-]+", r"rip\.?[a-zA-Z0-9_-]+", r"sub\.?[a-zA-Z0-9_-]+",
+    r"www\.[a-zA-Z0-9_-]+\.[a-z]{2,3}", r"[a-zA-Z0-9_-]+\.(com|net|org|me|li|la|io|tv|cc|pw)"
 ]
 
 # hdrip = High Definition Rip
@@ -160,23 +168,59 @@ def parse_filename(filename: str) -> dict:
         "confidence": "low"
     }
 
+    # === LIMPIEZA PREVIA DE METADATOS TÉCNICOS (IDs y Versiones) ===
+    # Lo hacemos ANTES de tocar puntos o guiones para que el Regex sea efectivo (ej: r1.0)
+    # Solo eliminamos tags técnicos aislados, NO listas de metadatos (eso va al final)
+    
+    # Quitar contenido si solo son números de IDs (evitando años de 4 cifras) o etiquetas de versión
+    # ej: [14611] -> vacio, (r1.0) -> vacio, pero (2024) se mantiene para el extractor de años
+    base_name = re.sub(r'[\(\[]\s*(\d{1,3}|\d{5,}|r\d+(\.\d+)?|v\d+(\.\d+)?|rev\d+)\s*[\)\]]', ' ', base_name, flags=re.IGNORECASE)
+
     # === REGEX ===
 
     # 1. Limpieza de dominios web (Buscamos esto ANTES de quitar los puntos)
-    # ej: www.Pelicula.com -> Pelicula
-    clean_name = re.sub(r'(?i)\b(?:www\.)?\w+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)\b', ' ', base_name)
+    # Solo limpiamos si empieza por www. o si está entre paréntesis/corchetes (ruido típico)
+    # ej: www.Pelicula.com -> Pelicula, (emulesonic.com) -> vacio
+    clean_name = re.sub(r'(?i)\bwww\.[a-z0-9-]+\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)\b', ' ', base_name)
+    clean_name = re.sub(r'(?i)[\(\[][^\]\)]*\.(me|es|com|net|org|io|tv|info|mx|to|li|tw|re|be|yt|us)[\)\]]', ' ', clean_name)
 
     # 2. Sustitución de separadores comunes por espacios.
     clean_name = re.sub(r'[\._]', ' ', clean_name)
 
-    # Extraer año (Buscamos 19xx o 20xx)
-    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', clean_name)
+    # 3. Separación de letras y números (ej: h264Español -> h264 Español)
+    # Refinado para NO romper títulos con leetspeak (como "Se7en" o "Thir13en")
+    # Solo separamos si el número es grande (3+ cifras como años/resoluciones) o si empieza por prefijos técnicos (h, x, s, e)
+    clean_name = re.sub(r'(?i)([a-záéíóúüñ])(\d{3,4})', r'\1 \2', clean_name)
+    clean_name = re.sub(r'(?i)(\d{3,4})([a-záéíóúüñ])', r'\1 \2', clean_name)
+    clean_name = re.sub(r'(?i)\b([hxse])(\d+)\b', r'\1 \2', clean_name)
 
-    if year_match:
-        result["year"] = int(year_match.group(1))
-        # Reemplazamos el año del título
-        clean_name = clean_name.replace(year_match.group(0), " ")
+    # Extraer año (Buscamos 19xx o 20xx)
+    # Buscamos TODOS los candidatos y seleccionamos el más probable (el último que no sea resolución)
+    year_candidates = list(re.finditer(r'\b(19\d{2}|20\d{2})\b', clean_name))
+    valid_year_match = None
+    
+    for match in reversed(year_candidates):
+        # Verificamos que no sea parte de una resolución (ej: 1920 x 1080)
+        # Solo rechazamos si la 'x' está rodeada de dígitos cerca del match
+        start, end = match.span()
+        context = clean_name[max(0, start-5):end+5].lower()
+        if re.search(r'\d+\s*x\s*\d+', context):
+            continue # Parte de una resolución
+            
+        valid_year_match = match
+        break
+
+    if valid_year_match:
+        potential_year = int(valid_year_match.group(1))
+        start, end = valid_year_match.span()
+        temp_name = clean_name[:start] + " " + clean_name[end:]
         
+        if temp_name.strip():
+            result["year"] = potential_year
+            clean_name = temp_name
+        else:
+            # Si el título queda vacío, el "año" era el título (ej: 1917.mkv)
+            pass
 
     # Extraer temporada y episodio. Patrones como S01E03, 1x03, Season 1 Episode 3... 
     s_e_match = re.search(r's\s*(\d{1,2})\s*e\s*(\d{1,2})', clean_name, re.IGNORECASE)
@@ -195,45 +239,21 @@ def parse_filename(filename: str) -> dict:
         if q_match:
             val = q_match.group(0).lower().replace(" ", "")
             result["quality"] = val
-            # Si el tag es una resolución conocida (según los filtros de la BDD), la guardamos en resolution
-            if re.match(r'\d{3,4}p|4k|uhd|2k', val):
+            # Solo guardamos en 'resolution' si NO tenemos una resolución real ya detectada
+            if re.match(r'\d{3,4}p|4k|uhd|2k', val) and not result.get("resolution"):
                 result["resolution"] = val
             clean_name = clean_name.replace(q_match.group(0), " ")
             break
             
-    # Eliminar resto de basura de Scene Tags
-    for tag in SCENE_TAGS:
-        clean_name = re.sub(r'(?i)\b' + tag + r'\b', ' ', clean_name)
-
-    # 4. Separación de letras y números (ej: Pelicula2019 -> Pelicula 2019)
-    # Lo hacemos después de las etiquetas para que cosas como 1080p se borren íntegras
-    clean_name = re.sub(r'([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])(\d)', r'\1 \2', clean_name)
-    clean_name = re.sub(r'(\d)([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ])', r'\1 \2', clean_name)
-
-    # Eliminar la firma del uploader (como "by mDudikoff" o "-GrpName")
-    clean_name = re.sub(r'(?i)\bby\s+[\w]+\b', '', clean_name)
-    # Mejorada para capturar grupos al final (ej: -GETB8 o -GETB 8) sin romper títulos con guion
-    clean_name = re.sub(r'-\s*[a-zA-Z0-9]+(\s*\d{1,4})?$', '', clean_name)
-    
-    # Limpiar prefijos inútiles al inicio (ej: FILM -, __, [DIVE - ITA])
-    clean_name = re.sub(r'(?i)^(film|video|movie|audio|documentary)\s*-\s*', '', clean_name)
-    
-    # Extraer resoluciones ANTES de borrarlas (ej: 1920x1080)
-    res_matches = re.findall(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', clean_name)
-    if res_matches:
-        # Usamos set() para evitar duplicados y normalizamos quitando espacios (ej: 1920 x 1080 -> 1920x1080)
-        res_clean = [r.lower().replace(" ", "") for r in res_matches]
-        result["resolution"] = ", ".join(sorted(set(res_clean)))
-    clean_name = re.sub(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', ' ', clean_name)
-
     # === EXTRACCIÓN Y NORMALIZACIÓN DE IDIOMAS ===
+    # Lo hacemos ANTES de la limpieza de tags para evitar que el ruido rompa bloques multilingües
     
     # Generamos un patrón dinámico con todas las claves de nuestro mapa de idiomas
     lang_pattern = r'\b(' + '|'.join(re.escape(k) for k in LANGUAGE_MAP.keys()) + r')\b'
     
     # 1. Buscamos combinaciones (ej: ESP-ENG) o idiomas sueltos (ej: Latino, Spanish)
     # También buscamos códigos prefijados con + (ej: +ES)
-    found_langs = re.findall(r'(?i)\b(?:[a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', clean_name)
+    found_langs = re.findall(r'(?i)\b(?:[a-z]{2,3}[-+\/&])+[a-z]{2,3}\b', clean_name)
     found_langs += re.findall(r'(?i)' + lang_pattern, clean_name)
     found_langs += re.findall(r'(?i)\b\+([a-z]{2,10})\b', clean_name)
 
@@ -261,43 +281,71 @@ def parse_filename(filename: str) -> dict:
                     valid_codes.append(p_clean)
         
         if valid_codes:
-            # Guardamos códigos únicos y ordenados (ej: EN-ES)
             result["languages"] = "-".join(sorted(set(valid_codes)))
 
-    # === EXTRACCIÓN DE SUBTÍTULOS (VOSE, VOS, SUBS, HC) ===
-    # Buscamos patrones de subtítulos de forma ultra-simplificada para evitar complejidad
-    sub_pattern = r'(?i)\b(v[ .]?o[ .]?s[ .]?e?\.?|sub(?:titles?)?|hc-?subs?)\b'
+    # Detectar subtítulos (ej: Sub Spanish, Subs Eng, VOS)
+    sub_pattern = r'(?i)\b(vost?f?|vos[as]?|subs?|subtitles|v\.o\.s\.)\s*([a-z]{2,10})?\b'
     sub_matches = re.findall(sub_pattern, clean_name)
-    
     if sub_matches:
         subs_found = []
-        for sm in sub_matches:
-            sm_clean = sm.lower().replace(".", "").replace(" ", "").replace("-", "")
-            if "vose" in sm_clean:
-                subs_found.append("ES")
-            elif "vos" in sm_clean:
-                subs_found.append("Original")
-            elif "hc" in sm_clean:
-                subs_found.append("Hardcoded")
+        for m in sub_matches:
+            if m[1]: # Si hay un idioma capturado después de "subs"
+                lang_code = m[1].upper()
+                if lang_code in LANGUAGE_MAP:
+                    subs_found.append(LANGUAGE_MAP[lang_code])
+                else:
+                    subs_found.append(lang_code)
             else:
-                subs_found.append("Yes")
-        
+                subs_found.append("YES")
         if subs_found:
             result["subtitles"] = "/".join(sorted(set(subs_found)))
 
-    # Limpieza de rastros de idiomas y subtítulos en el título
-    clean_name = re.sub(r'(?i)\b([a-z]{2,10}[-+\/&])+[a-z]{2,10}\b', ' ', clean_name)
+    # === LIMPIEZA DE TAGS Y RUIDO ===
+
+    # Eliminar resto de basura de Scene Tags
+    for tag in SCENE_TAGS:
+        clean_name = re.sub(r'(?i)\b' + tag + r'\b', ' ', clean_name)
+
+    # Eliminar la firma del uploader (como "by mDudikoff", "by.ana-axis", "by-Group")
+    clean_name = re.sub(r'(?i)\bby[\s\.-]+[a-z0-9_-]+\b', ' ', clean_name)
+    
+    # Limpieza de grupo al final (solo si hay un guion claro antes del grupo, para evitar borrar palabras del título)
+    clean_name = re.sub(r'-\s*[a-zA-Z0-9_-]+(\s*\d{1,4})?$', ' ', clean_name)
+    
+    # Limpiar prefijos inútiles al inicio (ej: FILM -, __, [DIVE - ITA])
+    clean_name = re.sub(r'(?i)^(film|video|movie|audio|documentary)\s*-\s*', '', clean_name)
+    
+    # Extraer resoluciones ANTES de borrarlas (ej: 1920x1080)
+    res_matches = re.findall(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', clean_name)
+    if res_matches:
+        # Usamos set() para evitar duplicados y normalizamos quitando espacios (ej: 1920 x 1080 -> 1920x1080)
+        res_clean = [r.lower().replace(" ", "") for r in res_matches]
+        result["resolution"] = ", ".join(sorted(set(res_clean)))
+    clean_name = re.sub(r'(?i)\b\d{3,4}\s*x\s*\d{3,4}\b', ' ', clean_name)
+
+    # Limpieza de rastros de idiomas y subtítulos en el título (basado en lo extraído antes)
+    clean_name = re.sub(r'(?i)\b([a-z]{2,3}[-+\/&])+[a-z]{2,3}\b', ' ', clean_name)
     clean_name = re.sub(r'(?i)\b(\+[a-z]{2,10})\b', ' ', clean_name)
     clean_name = re.sub(r'(?i)\b(subs?&\w+)\b', ' ', clean_name)
-    clean_name = re.sub(sub_pattern, ' ', clean_name)
+    if 'sub_pattern' in locals():
+        clean_name = re.sub(sub_pattern, ' ', clean_name)
+    
+    # Limpiar lo que haya quedado de los mapas de idiomas
+    # REGLA DE ORO: Solo borramos palabras LARGAS (>2 letras) o combinaciones.
+    # No borramos códigos de 2 letras sueltos para evitar colisiones con preposiciones (DE, EN).
+    lang_clean_list = [k for k in LANGUAGE_MAP.keys() if len(k) > 2]
+    lang_clean_pattern = r'(?i)\b(' + '|'.join(re.escape(k) for k in lang_clean_list) + r')\b'
+    clean_name = re.sub(lang_clean_pattern, ' ', clean_name)
+
     clean_name = re.sub(r'(?i)\b(hq)\b', ' ', clean_name) # Limpiamos HQ específicamente
 
-    # Limpieza inteligente de paréntesis y corchetes:
-    # 1. Quitar contenido de paréntesis o corchetes si parece una lista o metadata (contiene comas o espacios)
+    # Quitar contenido de paréntesis o corchetes si parece una lista o metadata (contiene comas o espacios)
+    # Lo hacemos al final porque el año ya ha sido extraído y borrado de clean_name.
     clean_name = re.sub(r'[\(\[][^\]\)]*,[^\]\)]*[\)\]]', ' ', clean_name)
-    # 2. Quitar tags de idioma pegados tipo "Spanishsub"
+
+    # Quitar tags de idioma pegados tipo "Spanishsub"
     clean_name = re.sub(r'(?i)\b\w+sub\b', ' ', clean_name)
-    # 3. Quitar solo los símbolos para el resto, preservando el texto (títulos duales)
+    # Quitar solo los símbolos residuales para el resto, preservando el texto (títulos duales)
     clean_name = re.sub(r'[\[\]\(\)]', ' ', clean_name)
     
     # Quitar palabras técnicas, grupos de ripeo y extensiones falsas
@@ -310,7 +358,8 @@ def parse_filename(filename: str) -> dict:
         r"advanced", r"good", r"quality", r"fant", r"various", r"artists", r"motion", r"picture",
         r"soundtrack", r"original", r"vip", r"hdlatino", r"ac3", r"aac\d*", r"av1", r"xvid", r"ld-aac",
         r"ld", r"md", r"allsubs", r"multisubs", r"multisub", r"multisubtitulos", r"v2", r"repack",
-        r"adv", r"hdts", r"runneo", r"sharethefiles", r"cinecalidad", r"atticusF", r"bone", r"mokona", r"braemen"
+        r"adv", r"hdts", r"runneo", r"sharethefiles", r"cinecalidad", r"atticusF", r"bone", r"mokona", r"braemen",
+        r"no-?logo-?ads?", r"no-?ads?", r"ads?"
     ]
     tech_pattern = r'(?i)\b(' + '|'.join(tech_keywords) + r')\b'
     clean_name = re.sub(tech_pattern, ' ', clean_name)
@@ -351,8 +400,9 @@ def parse_filename(filename: str) -> dict:
 
     # === FASE FINAL: Normalización de "Cicatrices" ===
     
-    # 1. Eliminar cualquier palabra de 1 o 2 letras que haya quedado suelta al final (típicos restos de tags)
-    clean_name = re.sub(r'\s+[a-zA-Z0-9]{1,2}$', '', clean_name)
+    # 1. Eliminar cualquier residuo de 1 o 2 letras sueltas al final que NO sea un número
+    # (ej: "Pelicula by", "Pelicula - de") -> Pero preservar "Terminator 2"
+    clean_name = re.sub(r'\s+[a-zA-Z]{1,2}$', '', clean_name)
 
     # 2. Convertir múltiples espacios o guiones en uno solo (de forma separada para no romper " - ")
     clean_name = re.sub(r'\s{2,}', ' ', clean_name)
