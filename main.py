@@ -810,6 +810,7 @@ EJEMPLOS DE USO:
     parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-preserve", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--backfill", action="store_true", help=argparse.SUPPRESS)
     
     args = parser.parse_args()
 
@@ -860,6 +861,13 @@ EJEMPLOS DE USO:
     if args.search is not None:
         query = args.search if isinstance(args.search, str) else (args.query_pos or "")
         search_files(query)
+        sys.exit(0)
+
+    # 2.7 Acción BACKFILL: Sincronizar metadatos antiguos
+    if args.backfill:
+        db = HashDatabase(DB_PATH)
+        db.sync_metadata_from_cache()
+        db.close()
         sys.exit(0)
 
     # 3. Acción PURGE: Herramienta administrativa

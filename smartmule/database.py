@@ -736,6 +736,66 @@ class HashDatabase:
         logger.debug(f"[*]  Registro y caché eliminados para hash: {ed2k_hash[:8]}...")
 
 
+    def sync_metadata_from_cache(self) -> int:
+        """
+        Backfill desde metadata_cache.
+        Extrae los campos 'overview', 'overview_en' y 'genres' del JSON almacenado en la caché
+        y los escribe en las columnas correspondientes de la tabla 'files'.
+        
+        Retorna el número de registros actualizados.
+        """
+        import json
+        
+        logger.info("[BACKFILL] Iniciando migración de metadatos desde la caché...")
+        
+        # 1. Obtenemos todos los registros de la caché que tienen metadatos
+        cursor = self._conn.execute("SELECT ed2k_hash, metadata FROM metadata_cache")
+        cached_records = cursor.fetchall()
+        
+        updated_count = 0
+        for ed2k_hash, metadata_json in cached_records:
+            try:
+                meta = json.loads(metadata_json)
+                
+                # Buscamos campos clave en el JSON (pueden estar en la raíz o en api_data)
+                overview = meta.get("overview")
+                overview_en = meta.get("overview_en")
+                genres = meta.get("genres")
+                
+                # Fallback a api_data si están anidados
+                if not overview and isinstance(meta.get("api_data"), dict):
+                    overview = meta["api_data"].get("overview")
+                    overview_en = meta["api_data"].get("overview_en")
+                    genres = meta["api_data"].get("genres")
+
+                # Normalizamos valores vacíos
+                overview = overview if overview else ""
+                overview_en = overview_en if overview_en else ""
+                genres = genres if genres else ""
+
+                if overview or overview_en or genres:
+                    # Actualizamos la tabla files para este hash
+                    # Solo actualizamos si la columna está vacía para no sobrescribir datos ya existentes
+                    sql = """
+                        UPDATE files 
+                        SET overview = ?, overview_en = ?, genres = ?
+                        WHERE ed2k_hash = ? AND (overview = '' OR overview IS NULL)
+                    """
+                    res = self._conn.execute(sql, (overview, overview_en, genres, ed2k_hash))
+                    if res.rowcount > 0:
+                        updated_count += res.rowcount
+            except Exception as e:
+                logger.error(f"[ERROR] No se pudo parsear metadata para {ed2k_hash}: {e}")
+                
+        self._conn.commit()
+        if updated_count > 0:
+            logger.info(f"[BACKFILL] Migración completada: {updated_count} registros actualizados con éxito.")
+        else:
+            logger.info("[BACKFILL] No se encontraron registros pendientes de actualización.")
+            
+        return updated_count
+
+
     # Función de actualización de metadatos
     def update_metadata(self, fingerprint: str, file_size: int, metadata: dict, final_path: str) -> None:
 
