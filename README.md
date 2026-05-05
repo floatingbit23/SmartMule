@@ -58,10 +58,10 @@ SmartMule organiza tus archivos en las siguientes categorías automáticas dentr
 
 *   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 
-*   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros. Localiza cualquier archivo por título, tipo, puntuación o resolución al instante.
+*   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros. Localiza cualquier archivo por título, tipo, puntuación o resolución al instante. 
     ```bash
-    python main.py --search "Matrix"               # Búsqueda por nombre o título
-    python main.py --search "type:movie score>8"  # Búsqueda con filtros
+    smartmule --search "Matrix"               # Búsqueda por nombre o título
+    smartmule --search "type:movie score>8"  # Búsqueda con filtros
     ```
 
 *   **Triaje Automático**: 
@@ -116,6 +116,50 @@ Para el análisis de archivos y desempate de películas, SmartMule requiere:
 
 ---
 
+## 🚀 Configuración del Alias (Recomendado)
+
+Para usar SmartMule de forma sencilla desde cualquier terminal (sin tener que escribir `python main.py` o activar el entorno virtual manualmente), configura el comando `smartmule`:
+
+### En Windows (PowerShell / CMD)
+1. Crea un archivo llamado `smartmule.bat` en una carpeta que esté en tu `PATH` (ej: `C:\Windows`).
+2. Pega este contenido ajustando las rutas a tu instalación:
+   ```batch
+   @echo off
+   C:\SmartMule\venv\Scripts\python.exe C:\SmartMule\main.py %*
+   ```
+
+### En Linux / macOS
+1. Abre tu configuración: `nano ~/.bashrc` (o `~/.zshrc`).
+2. Pega esta línea al final ajustando la ruta:
+   ```bash
+   alias smartmule='/home/user/SmartMule/venv/bin/python3 /home/user/SmartMule/main.py'
+   ```
+3. Recarga: `source ~/.bashrc`
+
+---
+
+## Comandos disponibles (CLI)
+
+Una vez configurado el alias, puedes usar estos comandos desde cualquier carpeta:
+
+| Comando | Descripción |
+| :--- | :--- |
+| `smartmule start` | Arranca el motor de vigilancia (Daemon). |
+| `smartmule stop` | Detiene el servicio de forma segura. |
+| `smartmule restart` | Reinicia el motor (Stop + Start). |
+| `smartmule --search "..."` | Búsqueda inteligente con filtros. |
+| `smartmule --stats` | Inventario y estadísticas de almacenamiento. |
+| `smartmule --status` | Chequeo de salud y dependencias. |
+| `smartmule --config` | Ver rutas y APIs activas. |
+| `smartmule --log [N]` | Ver últimas N líneas del log. |
+| `smartmule --purge "..."` | Herramienta de borrado selectivo. |
+| `smartmule --reprocess "..."`| Forzar nuevo análisis de un archivo. |
+| `smartmule --pid` | Ver el ID del proceso activo. |
+| `smartmule --debug` | Habilitar logs detallados de IA. |
+
+---
+
+
 ## Cómo funciona (El Pipeline de Datos)
 
 1.  **Monitorización**: El `Watcher` detecta el archivo.
@@ -137,71 +181,35 @@ SmartMule está diseñado para ejecutarse una sola vez y quedarse vigilando perm
     
     - **Linux**: Ejecuta `./smartmule_launcher.sh`. Este script usa `nohup` para que el proceso siga vivo aunque cierres la terminal.
 
-*   **Detener**: Ejecuta `python3 main.py stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
+*   **Detener**: Ejecuta `smartmule stop`. SmartMule detectará el proceso oculto y lo cerrará limpiamente.
 
     ![stop_pid](/images/stop_pid.png)
 
 *   **Auditoría**: Toda la actividad silenciosa quedará registrada en el archivo `smartmule.log`. Puedes ver las últimas líneas rápidamente con:
     ```bash
-    python main.py --log      # Muestra las últimas 30 líneas (por defecto)
-    python main.py --log 100  # Muestra las últimas 100 líneas
+    smartmule --log      # Muestra las últimas 30 líneas (por defecto)
+    smartmule --log 100  # Muestra las últimas 100 líneas
     ```
     O seguirlo en tiempo real en Windows:
     ```powershell
     Get-Content smartmule.log -Wait -Encoding UTF8
+    ```
+    Y en Linux / macOS:
+    ```bash
+    tail -f smartmule.log
     ```
 
     ![alt text](/images/logs.png)
 
 *   **Inventario y Estadísticas**: Para ver rápidamente qué archivos están registrados en la biblioteca, el desglose por categorías (Películas, Libros, etc.) y el tamaño total ocupado, usa el flag `--stats`. Para verificar el estado de salud y dependencias del sistema, usa `--status`. Si quieres verificar qué rutas y APIs tienes activas, usa `--config`:
     ```bash
-    python main.py --stats     # Ver estadísticas
-    python main.py --status    # Chequear salud del sistema
-    python main.py --config    # Ver configuración activa
+    smartmule --stats     # Ver estadísticas
+    smartmule --status    # Chequear salud del sistema
+    smartmule --config    # Ver configuración activa
     ```
 
     ![alt text](/images/inventory.png)
 
-### Alias en Linux
-
-Para evitar escribir la ruta del entorno virtual cada vez que quieras usar la CLI, puedes crear un alias en tu terminal:
-
-1.  Abre tu configuración: `nano ~/.bashrc`
-
-2.  Pega esta línea al final (ajusta la ruta si es necesario):
-    ```bash
-    alias smartmule='/home/user/SmartMule/venv/bin/python3 /home/user/SmartMule/main.py'
-    ```
-3.  Recarga la configuración: `source ~/.bashrc`
-
-### Alias en Windows
-
-Si quieres que el comando `smartmule` funcione tanto en **PowerShell** como en **CMD**:
-
-1.  Crea un archivo llamado `smartmule.bat` en una carpeta que esté en tu `PATH` (ej: `C:\Windows`).
-
-2.  Pega este contenido dentro (ajusta las rutas a tu instalación):
-    ```batch
-    @echo off
-    C:\SmartMule\venv\Scripts\python.exe C:\SmartMule\main.py %*
-    ```
-
-3.  ¡Listo! Ahora puedes usar los comandos simplificados desde cualquier terminal.
-
-### Comandos disponibles (vía Alias)
-
-Una vez configurado el alias, podrás usar desde cualquier terminal:
-*   `smartmule start` (Arranca el motor de SmartMule)
-*   `smartmule stop` (Detiene el servicio)
-*   `smartmule restart` (Reinicia el servicio)
-*   `smartmule --stats` (Ver inventario y estadísticas de almacenamiento)
-*   `smartmule --status` (Ver salud y dependencias del sistema)
-*   `smartmule --config` (Ver rutas y configuración de APIs activas)
-*   `smartmule --purge "Nombre"` (Borrar archivos)
-*   `smartmule --reprocess "Nombre"` (Forzar re-análisis de un archivo)
-*   `smartmule --debug` (Arranca con logs detallados de IA)
-*   `smartmule --pid`  (Muestra el PID del proceso activo)
-*   `smartmule --search [consulta]` (Búsqueda por nombre o título)
 
 ---
 
@@ -213,13 +221,13 @@ Para facilitar la limpieza total, SmartMule incluye un comando de purga/eliminac
 
 *   **Purga Selectiva**: Busca archivos por nombre, comodines (_Wildcards_) o expresiones regulares (_Regex_). 
     ```bash
-    python main.py --purge "nombre*"  # Encuentra archivos que empiecen por "nombre"
-    python main.py --purge "\.mkv$" # Encuentra todos los archivos con extensión .mkv
+    smartmule --purge "nombre*"  # Encuentra archivos que empiecen por "nombre"
+    smartmule --purge "\.mkv$" # Encuentra todos los archivos con extensión .mkv
     ```
 
 *   **Explorador Interactivo**: Si ejecutas el comando sin términos de búsqueda, SmartMule te mostrará la lista completa de tu biblioteca para que elijas qué eliminar.
     ```bash
-    python main.py --purge
+    smartmule --purge
     ```
 
 Ejemplo de uso:
@@ -227,7 +235,7 @@ Ejemplo de uso:
 
 *   **Modo Destructivo (Limpieza Total)**: ⚠️⚠️ Borra absolutamente todos los archivos registrados en la base de datos de un solo golpe.
     ```bash
-    python main.py --purge --all --no-preserve
+    smartmule --purge --all --no-preserve
     ```
     *Nota: Este comando requiere una confirmación de texto (escribir "BORRAR TODO") por seguridad.*
 
