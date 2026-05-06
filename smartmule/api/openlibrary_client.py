@@ -35,16 +35,16 @@ class OpenLibraryClient:
             time.sleep(self.min_delay - time_since_last)
         self.last_request_time = time.time()
 
-    def search_book(self, title: str) -> Optional[dict]:
+    def search_books(self, title: str) -> list[dict]:
         """
-        Busca un libro en OpenLibrary usando el título limpio.
-        Implementa reintentos para mayor resiliencia ante fallos de red.
+        Busca libros en OpenLibrary usando el título limpio.
+        Devuelve hasta 10 resultados para permitir un mejor desempate por autor.
         """
         endpoint = "/search.json"
         url = f"{OPENLIBRARY_BASE_URL}{endpoint}"
         params = {
             "q": title,
-            "limit": 1,
+            "limit": 10,
             "fields": "title,author_name,first_publish_year,cover_i,key,subject,ratings_average,number_of_pages_median,number_of_pages"
         }
 
@@ -62,19 +62,17 @@ class OpenLibraryClient:
                 logger.info(f"[OK] Conexión establecida con OpenLibrary (HTTP {response.status_code})")
                 data = response.json()
                 
-                if data and "docs" in data and len(data["docs"]) > 0:
-                    book = data["docs"][0]
+                results = []
+                if data and "docs" in data:
+                    for book in data["docs"]:
+                        # Transformamos la key de arreglo a string seguro si es necesario
+                        if isinstance(book.get("author_name"), list) and len(book["author_name"]) > 0:
+                            book["author_name_str"] = book["author_name"][0]
+                        else:
+                            book["author_name_str"] = "Autor Desconocido"
+                        results.append(book)
                     
-                # Transformamos la key de arreglo a string seguro si es necesario
-                # (OpenLibrary devuelve a veces author_name como array)
-                    if isinstance(book.get("author_name"), list) and len(book["author_name"]) > 0:
-                        book["author_name_str"] = book["author_name"][0]
-                    else:
-                        book["author_name_str"] = "Autor Desconocido"
-                    
-                    return book
-                    
-                return None
+                return results
                 
             except requests.exceptions.RequestException as e:
 
@@ -86,8 +84,8 @@ class OpenLibraryClient:
 
                 else:
                     logger.error(f"[ERR] Error definitivo conectando a OpenLibrary tras {max_retries} intentos: {e}")
-                    return None
-        return None
+                    return []
+        return []
 
     def get_book_details(self, work_key: str) -> Optional[dict]:
 

@@ -86,7 +86,8 @@ def _call_gemini(filename: str, extra_context: str = "") -> dict:
             )
             
             # Convertimos el string JSON a diccionario
-            result = json.loads(response.text) 
+            clean_text = _clean_json_text(response.text)
+            result = json.loads(clean_text) 
             result["confidence"] = "ai" 
             return result
             
@@ -111,6 +112,31 @@ def _call_gemini(filename: str, extra_context: str = "") -> dict:
             
             logger.error(f"[ERR] Error en Gemini (google-genai): {e}")
             return {"title": filename, "confidence": "failed", "error": error_msg}
+
+
+def _clean_json_text(raw_text: str) -> str:
+    """Extrae quirúrgicamente el bloque JSON de un texto sucio."""
+    if not raw_text:
+        return ""
+    
+    # Intento 1: Limpieza de markdown
+    if "```json" in raw_text:
+        raw_text = raw_text.split("```json")[1].split("```")[0]
+    elif "```" in raw_text:
+        raw_text = raw_text.split("```")[1].split("```")[0]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+
+    # Intento 2: Buscar llaves (por si hay texto antes o después)
+    try:
+        start_index = raw_text.find('{')
+        end_index = raw_text.rfind('}')
+        if start_index != -1 and end_index != -1:
+            raw_text = raw_text[start_index:end_index+1]
+    except Exception:
+        pass
+
+    return raw_text.strip()
 
 
 def analyze_media_content(title: str, author: str = None, media_type: str = "book") -> dict:
@@ -150,11 +176,8 @@ def analyze_media_content(title: str, author: str = None, media_type: str = "boo
             )
             raw_text = response.text
 
-        # Limpieza básica por si el modelo no respeta el JSON puro
-        if "```json" in raw_text:
-            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-        
-        return json.loads(raw_text)
+        clean_text = _clean_json_text(raw_text)
+        return json.loads(clean_text)
     except Exception as e:
         logger.error(f"[ERR] Error al generar descripción por IA: {e}")
         return {}
@@ -182,27 +205,9 @@ def _call_local_llm(filename: str, extra_context: str = "") -> dict:
         # Leemos el string resultado
         result_str = response.choices[0].message.content
         
-        if not result_str:
-            raise ValueError("El modelo devolvió una respuesta vacía.")
-
-        # Limpieza ultra-robusta: Extraemos solo lo que hay entre la primera '{' y la última '}'
-        try:
-            start_index = result_str.find('{')
-            end_index = result_str.rfind('}')
-            
-            if start_index != -1 and end_index != -1:
-                result_str = result_str[start_index:end_index+1]
-            else:
-                # Si no hay llaves, quizás el modelo respondió con bloques markdown
-                if "```" in result_str:
-                    result_str = result_str.split("```")[1]
-                    if result_str.startswith("json"):
-                        result_str = result_str[4:]
-        except Exception:
-            pass # Si falla la limpieza manual, intentamos parsear lo que haya
-        
         # Intentamos transformar JSON a diccionario
-        result = json.loads(result_str.strip())
+        clean_text = _clean_json_text(result_str)
+        result = json.loads(clean_text)
         
         if result is None:
             raise ValueError("No se pudo parsear el JSON de la respuesta.")

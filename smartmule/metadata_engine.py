@@ -488,23 +488,90 @@ class MetadataEngine:
         api_result = None
         best_similitud = 0
         
-        def _get_best_result(query: str):
-            res = self.openlibrary.search_book(query)
-            if res:
-                sim = SequenceMatcher(None, query.lower(), res.get("title", "").lower()).ratio()
-                return res, sim
-            return None, 0
+        def _get_best_result(query: str, target_author: str = ""):
+            books = self.openlibrary.search_books(query)
+            if not books:
+                return None, 0, False
+
+            best_res = None
+            max_sim = 0
+            best_author_match = False
+            best_is_primary = False
+
+            for res in books:
+                # Normalización de datos de la API
+                api_title = res.get("title", "").strip()
+                api_authors_raw = res.get("author_name", [])
+                if isinstance(api_authors_raw, str): api_authors_raw = [api_authors_raw]
+                api_authors = [a.lower().strip() for a in api_authors_raw]
+                
+                # Similitud de título
+                sim = SequenceMatcher(None, query.lower(), api_title.lower()).ratio()
+                
+                # Comprobación de autor
+                author_match = False
+                author_sim_score = 0
+                is_primary = False
+                
+                if target_author:
+                    for idx, a_api in enumerate(api_authors):
+                        # Match directo o fuzzy
+                        s = SequenceMatcher(None, target_author, a_api).ratio()
+                        if target_author in a_api or a_api in target_author or s > 0.8:
+                            author_match = True
+                            if s > author_sim_score: author_sim_score = s
+                            if idx == 0: is_primary = True
+                            if s > 0.8:
+                                logger.debug(f"[i] Candidato: '{api_title}' | Autor Match: '{a_api}' ({int(s*100)}%) | Primary: {is_primary}")
+                
+                logger.debug(f"[DEBUG] Evaluando: '{api_title}' (Sim: {sim:.2f}) | Match Autor: {author_match} | Primary: {is_primary}")
+
+                # Lógica de actualización del mejor resultado:
+                update = False
+                
+                # Definimos qué es un "Match Fuerte" (Autor principal + Título muy similar)
+                is_strong_match = author_match and is_primary and sim >= 0.8
+                best_was_strong = best_author_match and best_is_primary and max_sim >= 0.8
+
+                if is_strong_match and not best_was_strong:
+                    update = True # El primer match fuerte siempre gana a lo anterior
+                elif is_strong_match and best_was_strong:
+                    # Desempate entre dos matches fuertes: Prioridad absoluta a la antigüedad
+                    current_year = res.get("first_publish_year")
+                    best_year = best_res.get("first_publish_year")
+                    
+                    if current_year and best_year:
+                        if current_year < best_year:
+                            update = True
+                            logger.debug(f"[i] Prefiriendo obra original por antigüedad: {current_year} vs {best_year} ('{api_title}')")
+                    elif sim > max_sim:
+                        # Si no hay años para comparar, volvemos a la similitud de título
+                        update = True
+                elif not best_was_strong:
+                    # Si no hay matches fuertes, seguimos la lógica estándar de similitud
+                    if (author_match and not best_author_match) or \
+                       (author_match == best_author_match and sim > max_sim):
+                        update = True
+
+                if update:
+                    best_res, max_sim = res, sim
+                    best_is_primary = is_primary
+                    if author_match: best_author_match = True
+
+            return best_res, max_sim, best_author_match
+
+        autor_ia = data.get("author", "").lower()
 
         # Intento 1: Título Limpio (Español)
-        api_result, best_similitud = _get_best_result(titulo_limpio)
+        api_result, best_similitud, autor_match = _get_best_result(titulo_limpio, autor_ia)
         success = best_similitud >= 0.7
         
         # Intento 2: Título Original (IA / Inglés)
         if not success and original_title:
             logger.info(f"[BOOK] Similitud insuficiente con nombre en español. Probando título original IA: '{original_title}'...")
-            res_alt, sim_alt = _get_best_result(original_title)
-            if sim_alt > best_similitud:
-                api_result, best_similitud = res_alt, sim_alt
+            res_alt, sim_alt, auth_alt = _get_best_result(original_title, autor_ia)
+            if (auth_alt and not autor_match) or (sim_alt > best_similitud):
+                api_result, best_similitud, autor_match = res_alt, sim_alt, auth_alt
                 success = best_similitud >= 0.7
 
         # Intento 3: Plan B (Limpieza AKA)
@@ -512,36 +579,35 @@ class MetadataEngine:
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
             if titulo_alternativo:
                 logger.info(f"[RETRY] Probando limpieza alternativa (sin AKA): '{titulo_alternativo}'")
-                res_alt, sim_alt = _get_best_result(titulo_alternativo)
-                if sim_alt > best_similitud:
-                    api_result, best_similitud = res_alt, sim_alt
+                res_alt, sim_alt, auth_alt = _get_best_result(titulo_alternativo, autor_ia)
+                if (auth_alt and not autor_match) or (sim_alt > best_similitud):
+                    api_result, best_similitud, autor_match = res_alt, sim_alt, auth_alt
 
         if api_result:
-            # Validación de Autor (Red de seguridad para títulos traducidos)
-            autor_ia = data.get("author", "").lower()
-            autores_api_lista = api_result.get("author_name", [])
-            autor_match = False
-            
-            if autor_ia and autores_api_lista:
-                for a_api in autores_api_lista:
-                    a_api_low = a_api.lower()
-                    if autor_ia in a_api_low or a_api_low in autor_ia:
-                        autor_match = True
-                        logger.info(f"[MATCH] Autor coincidente: '{a_api}'.")
-                        break
-                
-                if not autor_match:
-                    logger.info(f"[i] Comparando autores: IA='{autor_ia}' vs API={autores_api_lista}")
-
             # Umbral dinámico: si el autor coincide, somos más flexibles con el título (60% en vez de 70%)
             umbral_seguridad = 0.6 if autor_match else 0.7
 
-            if best_similitud < umbral_seguridad:
+            if autor_match:
+                logger.info(f"[MATCH] Autor coincidente encontrado: '{api_result.get('author_name_str')}'.")
+
+            # Validación extra: Si el autor coincide, aceptamos si un título contiene al otro (casos de subtítulos)
+            is_substring_match = False
+            if autor_match:
+                t1 = api_result.get('title', "").lower().strip()
+                t2 = titulo_limpio.lower().strip()
+                if t1 in t2 or t2 in t1:
+                    is_substring_match = True
+                    logger.info("[OK] Aceptando por inclusión de título ('%s' contenido en consulta).", t1)
+
+            if best_similitud < umbral_seguridad and not is_substring_match:
                 logger.warning("[WARN] Libro descartado por baja similitud (%d%%): '%s' vs consulta. Umbral requerido: %d%%", 
                                int(best_similitud*100), api_result.get('title'), int(umbral_seguridad*100))
                 if autor_match:
                     logger.info("[i] Nota: El autor coincidía, pero la diferencia de título sigue siendo excesiva.")
+                api_result = None # Descartamos
+
             else:
+                
                 if autor_match and best_similitud < 0.7:
                     logger.info("[MATCH] Aceptando por autor coincidente (%d%% similitud).", int(best_similitud*100))
                 
