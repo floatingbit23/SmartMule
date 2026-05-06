@@ -14,7 +14,12 @@ Dependencias opcionales: fastembed, numpy
 
 import logging
 from typing import Optional, List, Dict, Any
-import numpy as np
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
 
 from smartmule import config
 
@@ -27,6 +32,10 @@ logger = logging.getLogger("SmartMule.embeddings")
 _model = None
 _model_name = None
 
+# Modelo de Re-ranking (Cross-Encoder)
+_rerank_model = None
+_rerank_model_name = None
+
 def is_available() -> bool:
 
     """
@@ -36,8 +45,7 @@ def is_available() -> bool:
 
     try:
         import fastembed  # noqa: F401
-        import numpy  # noqa: F401
-        return True
+        return _HAS_NUMPY
     except ImportError:
         return False
 
@@ -246,9 +254,12 @@ def build_metadata_text(record: dict) -> str:
         if year:
             parts.append(f"({year})")
 
-    # 4. Autor / Director
+    # 4. Autor / Director / Artista
     if record.get("author"):
         parts.append(f"de {record['author']}")
+    
+    if record.get("director") and record.get("director") != record.get("author"):
+        parts.append(f"Dirigida por {record['director']}")
 
     # 5. Géneros
     if record.get("genres"):
@@ -295,3 +306,74 @@ def build_metadata_text(record: dict) -> str:
     
     # Si hay metadatos, los unimos con puntos para separar conceptos
     return ". ".join(parts) if parts else record.get("file_name", "")
+
+
+def _load_rerank_model(model_name: str):
+
+    """Carga el modelo de re-ranking de forma Lazy Loading (ONNX Runtime)."""
+    global _rerank_model, _rerank_model_name
+    
+    # Si el modelo no está cargado o es diferente al configurado, lo cargo
+    if _rerank_model is None or _rerank_model_name != model_name:
+
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+        logger.info(f"[AI] Cargando modelo de re-ranking: {model_name}...")
+
+        # Instanciamos el Cross-Encoder (lo que usará la IA de nivel superior)
+        _rerank_model = TextCrossEncoder(model_name=model_name)
+        # y guardamos el nombre del modelo para futuras comparaciones
+        _rerank_model_name = model_name
+
+        logger.info("[OK] Modelo de Re-ranking cargado (ONNX)")
+        
+    return _rerank_model
+
+
+def rerank_results(query: str, results: List[Dict[str, Any]], model_name: str = None) -> List[Dict[str, Any]]:
+
+    """
+    Refina los resultados de la búsqueda usando un Cross-Encoder para mayor precisión.
+    
+    Este Cross-Encoder analiza (query, documento) simultáneamente, lo que es mucho más
+    preciso que comparar vectores por separado (Bi-Encoder), aunque más costoso.
+    """
+
+    if not results or not is_available():
+        return results
+        
+    if model_name is None:
+        from smartmule.config import CROSS_ENCODER_MODEL
+        model_name = CROSS_ENCODER_MODEL
+
+    # Cargamos el motor de re-ranking -> El que usará el Cross-Encoder
+    reranker = _load_rerank_model(model_name)
+    
+    # 1. Preparamos los textos de los documentos
+    # Usamos el metadata_text si existe (ya está pre-calculado en la caché)
+    passages = []
+
+    for r in results:
+        # Intentamos obtener el texto semántico que ya generamos al indexar
+        text = r.get('metadata_text') or build_metadata_text(r)
+        passages.append(text)
+        
+    # 2. Ejecutamos la inferencia (ONNX Runtime -> Reranking)
+    # rerank() devuelve un iterador de scores
+    scores = list(reranker.rerank(query, passages))
+    
+    # 3. Aplicamos los nuevos scores a los registros
+    for i, score in enumerate(scores):
+
+        # Actualizamos el score de relevancia
+        results[i]['rerank_score'] = float(score)
+
+        # Marcamos que este resultado ha sido "verificado" por el Cross-Encoder.
+        results[i]['is_reranked'] = True
+
+    # 4. Re-ordenamos basándonos en el score del Cross-Encoder
+
+    # Los scores suelen estar en un rango logit (negativos y positivos). Cuanto mayor, mejor.
+    results.sort(key=lambda x: x['rerank_score'], reverse=True)
+    
+    return results

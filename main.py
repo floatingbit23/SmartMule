@@ -21,6 +21,7 @@ Arquitectura (orden de ejecución):
 """
 
 import sys # Interacción con el intérprete
+import math
 import os  # Operaciones de sistema
 import shutil # Operaciones con archivos y directorios
 import signal # Captura de señales (Ctrl+C, apagado de sistema)
@@ -351,14 +352,18 @@ def search_files(query: str) -> None:
 
             title = item.get('official_title') or item.get('file_name', 'Unknown')
 
-            # Visualización del origen del match
+            # Visualización del origen del match e indicadores de precisión AI+
             origin = item.get('search_origin', 'TEXT').upper()
-            if origin == 'HYBRID':
-                match_ui = "🧠+📝" # Híbrido
+            is_reranked = item.get('is_reranked', False)
+
+            if is_reranked:
+                match_ui = "🧠✨ AI+"  # Precision Re-ranked
+            elif origin == 'HYBRID':
+                match_ui = "🧠+📝"     # Híbrido RRF
             elif origin == 'SEMANTIC':
-                match_ui = "🧠 AI"
+                match_ui = "🧠 AI"     # Semántico RRF
             else:
-                match_ui = "📝 TEXT"
+                match_ui = "📝 TEXT"   # FTS5 Puro
 
             status = "✅ ORG" if item.get('is_organized') else "⏳ PEN"
             
@@ -370,7 +375,12 @@ def search_files(query: str) -> None:
             rrf_val = item.get('relevance_score', 0)
             max_observed = item.get('max_observed_score', rrf_val) or rrf_val or 1.0
             
-            if origin == 'HYBRID':
+            if is_reranked:
+                # Usamos el score ya normalizado linealmente (5-80) por el motor en database.py
+                # Esto garantiza que los resultados secundarios sean visibles y no colapsen a 0.
+                score_100 = item.get('display_score', 0)
+                
+            elif origin == 'HYBRID':
                 # El ganador híbrido escala a 100, el resto proporcionalmente
                 score_100 = min(100.0, (rrf_val / max_observed) * 100.0)
             elif origin == 'SEMANTIC':

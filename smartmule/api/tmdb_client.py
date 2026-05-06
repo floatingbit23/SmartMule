@@ -141,6 +141,26 @@ class TMDBClient:
         params = {"language": language}
         return self._get(f"/tv/{tv_id}", params)
 
+    # Función para obtener los créditos de una película (Directores, Actores...)
+    def get_movie_credits(self, movie_id: int) -> Optional[dict]:
+        """Obtiene los créditos (cast y crew) de una película."""
+        return self._get(f"/movie/{movie_id}/credits", {})
+
+    # Función para obtener los créditos de una serie (Creadores, Directores...)
+    def get_tv_credits(self, tv_id: int) -> Optional[dict]:
+        """Obtiene los créditos (cast y crew) de una serie."""
+        return self._get(f"/tv/{tv_id}/credits", {})
+
+    # Función para obtener las palabras clave (Keywords) de una película
+    def get_movie_keywords(self, movie_id: int) -> Optional[dict]:
+        """Obtiene las palabras clave de una película."""
+        return self._get(f"/movie/{movie_id}/keywords", {})
+
+    # Función para obtener las palabras clave (Keywords) de una serie
+    def get_tv_keywords(self, tv_id: int) -> Optional[dict]:
+        """Obtiene las palabras clave de una serie."""
+        return self._get(f"/tv/{tv_id}/keywords", {})
+
     # Mapeo de géneros de TMDB (IDs a nombres bilingües ES | EN)
     _GENRE_MAP = {
         12: "Aventura | Adventure", 

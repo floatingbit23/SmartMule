@@ -77,7 +77,12 @@ class HashDatabase:
             duration INTEGER DEFAULT 0, -- Duración en segundos (extraída por FFmpeg)
             overview TEXT DEFAULT '', -- Sinopsis/Resumen (TMDB)
             overview_en TEXT DEFAULT '', -- Sinopsis/Resumen en inglés (TMDB)
-            genres TEXT DEFAULT '' -- Géneros (TMDB/MusicBrainz)
+            genres TEXT DEFAULT '', -- Géneros (TMDB/MusicBrainz)
+            director TEXT DEFAULT '', -- Director (TMDB)
+            cast TEXT DEFAULT '', -- Reparto/Actores (TMDB)
+            original_title TEXT DEFAULT '', -- Título original (TMDB)
+            collection TEXT DEFAULT '', -- Colección/Saga (TMDB)
+            keywords TEXT DEFAULT '' -- Palabras clave/Temas (TMDB)
         );
     """
 
@@ -112,6 +117,11 @@ class HashDatabase:
             overview,
             overview_en,
             genres,
+            director,
+            cast,
+            original_title,
+            collection,
+            keywords,
             content='files',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
@@ -121,24 +131,24 @@ class HashDatabase:
     # Triggers para sincronización automática en tiempo real
     _CREATE_TRIGGER_AI_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.director, new.cast, new.original_title, new.collection, new.keywords);
         END;
     """
 
     _CREATE_TRIGGER_AD_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.director, old.cast, old.original_title, old.collection, old.keywords);
         END;
     """
 
     _CREATE_TRIGGER_AU_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres);
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.director, old.cast, old.original_title, old.collection, old.keywords);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.director, new.cast, new.original_title, new.collection, new.keywords);
         END;
     """
 
@@ -174,7 +184,12 @@ class HashDatabase:
         "ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;",
         "ALTER TABLE files ADD COLUMN overview TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN overview_en TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN genres TEXT DEFAULT '';"
+        "ALTER TABLE files ADD COLUMN genres TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN director TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN cast TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN original_title TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN collection TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN keywords TEXT DEFAULT '';"
     ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
@@ -236,6 +251,14 @@ class HashDatabase:
         self._conn.execute(self._CREATE_INDEX_SQL)
         
         # Infraestructura de búsqueda inteligente (FTS5 + Triggers)
+        
+        # Verificación de integridad de FTS5 (Recrear si faltan nuevas columnas)
+        try:
+            self._conn.execute("SELECT original_title, collection, keywords FROM files_fts LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas (original_title/collection/keywords)...")
+            self._conn.execute("DROP TABLE IF EXISTS files_fts")
+
         self._conn.execute(self._CREATE_FTS_TABLE_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AI_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AD_SQL)
@@ -623,9 +646,9 @@ class HashDatabase:
                 sql += " WHERE " + " AND ".join(where_clauses)
             
             # Ordenamos por BM25 con pesos (valores negativos: más negativo = más relevante)
-            # Pesos: file_name, official_title, author, languages, overview, overview_en, genres
+            # Pesos (importancia relativa): file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords
             if text_query:
-                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8) ASC"
+                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8, 2.5, 1.2, 1.8, 2.2, 2.0) ASC"
             else:
                 sql += " ORDER BY f.processed_at DESC"
             
@@ -813,27 +836,42 @@ class HashDatabase:
                 overview = meta.get("overview")
                 overview_en = meta.get("overview_en")
                 genres = meta.get("genres")
+                director = meta.get("director")
+                cast = meta.get("cast")
+                original_title = meta.get("original_title")
+                collection = meta.get("collection")
+                keywords = meta.get("keywords")
                 
                 # Fallback a api_data si están anidados
                 if not overview and isinstance(meta.get("api_data"), dict):
                     overview = meta["api_data"].get("overview")
                     overview_en = meta["api_data"].get("overview_en")
                     genres = meta["api_data"].get("genres")
+                    director = meta["api_data"].get("director")
+                    cast = meta["api_data"].get("cast")
+                    original_title = meta["api_data"].get("original_title")
+                    collection = meta["api_data"].get("collection")
+                    keywords = meta["api_data"].get("keywords")
 
                 # Normalizamos valores vacíos
                 overview = overview if overview else ""
                 overview_en = overview_en if overview_en else ""
                 genres = genres if genres else ""
+                director = director if director else ""
+                cast = cast if cast else ""
+                original_title = original_title if original_title else ""
+                collection = collection if collection else ""
+                keywords = keywords if keywords else ""
 
-                if overview or overview_en or genres:
+                if overview or overview_en or genres or director or cast or original_title or collection or keywords:
                     # Actualizamos la tabla files para este hash
                     # Solo actualizamos si la columna está vacía para no sobrescribir datos ya existentes
                     sql = """
                         UPDATE files 
-                        SET overview = ?, overview_en = ?, genres = ?
+                        SET overview = ?, overview_en = ?, genres = ?, director = ?, cast = ?, original_title = ?, collection = ?, keywords = ?
                         WHERE ed2k_hash = ? AND (overview = '' OR overview IS NULL)
                     """
-                    res = self._conn.execute(sql, (overview, overview_en, genres, ed2k_hash))
+                    res = self._conn.execute(sql, (overview, overview_en, genres, director, cast, original_title, collection, keywords, ed2k_hash))
                     if res.rowcount > 0:
                         updated_count += res.rowcount
             except Exception as e:
@@ -900,12 +938,13 @@ class HashDatabase:
             """
             UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, overview=?, overview_en=?, genres=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, overview=?, overview_en=?, genres=?, director=?, cast=?, original_title=?, collection=?, keywords=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
              resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, 
-             api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), fingerprint, file_size)
+             api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), api_data.get("director", ""), api_data.get("cast", ""), 
+             api_data.get("original_title", ""), api_data.get("collection", ""), api_data.get("keywords", ""), fingerprint, file_size)
         )
 
         # Confirma los cambios
@@ -1133,8 +1172,8 @@ class HashDatabase:
                 score = float(scores[idx])
                 
                 # FILTRO DE RUIDO: Si la similitud es muy baja, la ignoramos para evitar "basura"
-                # Bajamos de 0.24 a 0.20 para mejorar el recall en búsquedas abstractas
-                if score < 0.20 or fid in seen_ids:
+                # Subimos de 0.20 a 0.28 para reducir ruido en resultados secundarios (posiciones 5-10)
+                if score < 0.28 or fid in seen_ids:
                     continue
                 
                 record = self.get_file_by_id(fid)
@@ -1222,32 +1261,60 @@ class HashDatabase:
             
             record_map[fid]['semantic_score'] = similarity
 
-        # 3. Ordenación final por relevancia combinada (puntuación Weighted RRF de mayor a menor)
+        # 3. Ordenación inicial por relevancia combinada (RRF)
         sorted_results = sorted(rrf_map.items(), key=lambda x: x[1], reverse=True)
 
-        # 4. Construcción del TOP N (los mejores 10 resultados, ya ordenados por relevancia combinada)
+        # 4. Re-ranking (Solo si hay IA y resultados suficientes)
+        # Refinamos el TOP 20 inicial usando el Cross-Encoder (mucho más preciso)
+        top_candidates = [record_map[fid] for fid, _ in sorted_results[:20]]
+        
+        from smartmule.embeddings import is_available, rerank_results
+        
         final_list = []
-
-        # Calculamos el score máximo REAL para normalización dinámica en la capa de presentación.
-        # Esto permite que el rango 0-100 se expanda dinámicamente según la distribución real de scores,
-        # en lugar de usar el máximo teórico (que siempre da scores comprimidos en búsquedas conceptuales).
-        max_observed_score = sorted_results[0][1] if sorted_results else 1.0
+        if is_available() and query.strip() and top_candidates:
+            
+            # Re-calculamos el orden usando el modelo de nivel superior
+            final_list = rerank_results(query, top_candidates)
+            
+            # Normalización del score del rerank para visualización (Rango relativo [5, 80])
+            if final_list:
+                max_logit = final_list[0].get('rerank_score', 1.0)
+                min_logit = final_list[-1].get('rerank_score', max_logit - 10.0)
+                logit_range = max(max_logit - min_logit, 1.0)
+                
+                for r in final_list:
+                    raw = r.get('rerank_score', 0)
+                    
+                    # CASO ESPECIAL: Si solo hay un resultado o todos empatan (rango = 0)
+                    if logit_range <= 0 or max_logit == min_logit:
+                        # Si es el único, le damos el máximo de la escala de rerank (80)
+                        normalized = 80.0
+                    else:
+                        # Normalización lineal mapeada a [5, 80]
+                        normalized = 5.0 + ((raw - min_logit) / logit_range) * 75.0
+                        
+                    r['relevance_score'] = raw
+                    r['display_score'] = min(80.0, max(5.0, normalized))
+                    r['max_observed_score'] = max_logit
+        else:
+            # Fallback a RRF normal si no hay IA
+            max_observed_score = sorted_results[0][1] if sorted_results else 1.0
 
         # Recorremos los resultados ordenados
-        for fid, rrf_score in sorted_results[:limit]:
+            for fid, rrf_score in sorted_results[:limit]:
 
             # Obtenemos el registro completo (el diccionario con todos los metadatos del archivo)
-            record = record_map[fid]
+                record = record_map[fid]
 
             # Añadimos el score del Weighted RRF y el máximo observado para normalización dinámica
-            record['relevance_score'] = rrf_score
-            record['max_observed_score'] = max_observed_score
+                record['relevance_score'] = rrf_score
+                record['max_observed_score'] = max_observed_score
 
             # Añadimos el registro a la lista final
-            final_list.append(record)
+                final_list.append(record)
 
         # Devolvemos el TOP N de resultados
-        return final_list
+        return final_list[:limit]
 
 
     def upsert_embedding(self, file_id: int, record: dict) -> bool:

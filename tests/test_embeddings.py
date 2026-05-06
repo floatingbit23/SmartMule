@@ -1,11 +1,11 @@
 import pytest
-import numpy as np
 import sys
 from unittest.mock import patch
 
 from smartmule.embeddings import is_available
 
 if is_available():
+    import numpy as np
     from smartmule.embeddings import encode_text, decode_blob, cosine_similarity_batch, build_metadata_text
     from smartmule.database import HashDatabase
 
@@ -69,9 +69,16 @@ def test_rrf_fusion_behavior():
     """Verifica que Weighted RRF fusiona correctamente FTS y Semantic en la BBDD."""
     db = HashDatabase(":memory:")
     
-    # RRF occurs inside search_hybrid. Let's mock search_by_name and search_semantic
+    # RRF occurs inside search_hybrid. Let's mock search_by_name, search_semantic and rerank_results
+    def mock_rerank_impl(q, r_list):
+        for r in r_list:
+            r['rerank_score'] = r.get('semantic_score', 0.5)
+            r['is_reranked'] = True
+        return sorted(r_list, key=lambda x: x['rerank_score'], reverse=True)
+
     with patch.object(db, 'search_by_name') as mock_fts, \
-         patch.object(db, 'search_semantic') as mock_sem:
+         patch.object(db, 'search_semantic') as mock_sem, \
+         patch('smartmule.embeddings.rerank_results', side_effect=mock_rerank_impl) as mock_rerank:
          
         mock_fts.return_value = [{"id": 1, "file_name": "movie1.mkv"}]
         mock_sem.return_value = [
@@ -81,12 +88,32 @@ def test_rrf_fusion_behavior():
         
         results = db.search_hybrid("query test")
         
-        # El archivo 1 debe tener 'search_origin' = 'hybrid' y estar ordenado (dependiendo del score final)
-        assert len(results) == 2
+        # El archivo 2 debe ser el primero ahora debido al re-ranking (score 0.9 vs 0.8)
+        assert results[0]["id"] == 2
+        assert results[0]["search_origin"] == "semantic"
+        assert results[0]["is_reranked"] == True
         
-        # Verificar el origen
-        assert results[0]["id"] == 1
-        assert results[0]["search_origin"] == "hybrid"
-        
-        assert results[1]["id"] == 2
-        assert results[1]["search_origin"] == "semantic"
+        # El archivo 1 debe estar presente y marcado como híbrido (porque estaba en FTS)
+        assert any(r["id"] == 1 for r in results)
+        record1 = next(r for r in results if r["id"] == 1)
+        assert record1["search_origin"] == "hybrid"
+
+
+@pytest.mark.skipif(not is_available(), reason="FastEmbed not installed")
+def test_rerank_results_logic():
+    """El re-ranker debería ser capaz de re-ordenar resultados basándose en la semántica profunda."""
+    from smartmule.embeddings import rerank_results
+    
+    query = "película de ciencia ficción en el espacio"
+    results = [
+        {"id": 1, "official_title": "El Padrino", "overview": "Crimen y mafia en Nueva York."},
+        {"id": 2, "official_title": "Interstellar", "overview": "Un grupo de astronautas viaja a través de un agujero de gusano en el espacio."}
+    ]
+    
+    # Re-rankeamos
+    reranked = rerank_results(query, results)
+    
+    # Interstellar debería estar el primero ahora
+    assert reranked[0]["id"] == 2
+    assert reranked[0]["is_reranked"] == True
+    assert "rerank_score" in reranked[0]

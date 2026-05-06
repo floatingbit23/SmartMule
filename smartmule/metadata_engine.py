@@ -379,6 +379,60 @@ class MetadataEngine:
                         if details:
                             res["overview_en"] = details.get("overview")
                         
+                        # --- MEJORA: Obtención de Director ---
+                        if res_id:
+
+                            media_credits = None
+
+                            if data.get("season"):
+                                media_credits = self.tmdb.get_tv_credits(res_id)
+                            else:
+                                media_credits = self.tmdb.get_movie_credits(res_id)
+                            
+                            if media_credits:
+
+                                # En películas, buscamos Job: 'Director'
+                                # En series, TMDB suele poner a los creadores en 'created_by' en details, pero también hay directores en crew de episodios (complejo). 
+                                
+                                # Por ahora, buscamos Directores en crew general.
+                                directors = [member.get("name") for member in media_credits.get("crew", []) if member.get("job") == "Director"]
+                                
+                                if directors:
+                                    res["director"] = ", ".join(directors)
+
+                                elif data.get("season"):
+                                    # Fallback para series: Creadores (desde 'details' si están ahí)
+                                    creators = details.get("created_by", [])
+                                    if creators:
+                                        res["director"] = ", ".join([c.get("name") for c in creators])
+
+                                # Obtención de Actores (Cast)
+                                cast_list = media_credits.get("cast", [])
+                                top_actors = [member.get("name") for member in cast_list[:10]] # Tomamos los 10 principales
+                                if top_actors:
+                                    res["cast"] = ", ".join(top_actors)
+
+                                # Obtención de Keywords (Etiquetas temáticas)
+                                keywords_data = None
+                                if data.get("season"):
+                                    keywords_data = self.tmdb.get_tv_keywords(res_id)
+                                    if keywords_data:
+                                        keywords_list = [k.get("name") for k in keywords_data.get("results", [])]
+                                        res["keywords"] = ", ".join(keywords_list)
+                                else:
+                                    keywords_data = self.tmdb.get_movie_keywords(res_id)
+                                    if keywords_data:
+                                        keywords_list = [k.get("name") for k in keywords_data.get("keywords", [])]
+                                        res["keywords"] = ", ".join(keywords_list)
+
+                                # Título Original y Colección
+                                res["original_title"] = details.get("original_title") or details.get("original_name", "")
+                                
+                                if not data.get("season"):
+                                    collection = details.get("belongs_to_collection")
+                                    if collection and isinstance(collection, dict):
+                                        res["collection"] = collection.get("name", "")
+                        
                         if api_runtime > 0:
 
                             diff = abs(file_dur_min - api_runtime)
@@ -418,7 +472,12 @@ class MetadataEngine:
                 "poster_url": poster,
                 "overview": api_result.get("overview"),
                 "overview_en": api_result.get("overview_en"),
-                "genres": genres_str
+                "genres": genres_str,
+                "director": api_result.get("director", ""),
+                "cast": api_result.get("cast", ""),
+                "original_title": api_result.get("original_title", ""),
+                "collection": api_result.get("collection", ""),
+                "keywords": api_result.get("keywords", "")
             }
 
     
