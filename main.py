@@ -402,7 +402,22 @@ def search_files(query: str) -> None:
                 title = title[:32] + "..."
                 
             print(f"{item['id']:<4} | {media_type:<18} | {title:<38} | {match_ui:<10} | {score_ui:<7} | {status}")
+
+            # --- BLOQUE DE DETALLES EXTENDIDOS (Si existen) ---
+            has_details = any([item.get('overview'), item.get('cast'), item.get('collection'), item.get('keywords'), item.get('pages')])
             
+            if has_details:
+                # Colección / Saga
+                if item.get('collection'):
+                    print(f"     \033[90m🏷️  Saga/Colección: {item['collection']}\033[0m")
+
+                # Páginas (para libros)
+                if item.get('pages'):
+                    print(f"     \033[90m📖 Páginas: {item['pages']}\033[0m")
+
+                
+                print("") # Espacio extra para separar bloques detallados
+                
         print(f"\n[DONE] Mostrando {len(results)} resultados ordenados por relevancia (Weighted RRF Score).\n")
 
     except Exception as e:

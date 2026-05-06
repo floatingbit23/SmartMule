@@ -75,6 +75,7 @@ class HashDatabase:
             final_path TEXT DEFAULT '', -- Ruta final del archivo
             is_organized INTEGER DEFAULT 0, -- Por defecto: no organizado=0, organizado=1 
             duration INTEGER DEFAULT 0, -- Duración en segundos (extraída por FFmpeg)
+            pages INTEGER DEFAULT 0, -- Número de páginas (OpenLibrary)
             overview TEXT DEFAULT '', -- Sinopsis/Resumen (TMDB)
             overview_en TEXT DEFAULT '', -- Sinopsis/Resumen en inglés (TMDB)
             genres TEXT DEFAULT '', -- Géneros (TMDB/MusicBrainz)
@@ -117,6 +118,7 @@ class HashDatabase:
             overview,
             overview_en,
             genres,
+            pages,
             director,
             cast,
             original_title,
@@ -131,24 +133,24 @@ class HashDatabase:
     # Triggers para sincronización automática en tiempo real
     _CREATE_TRIGGER_AI_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.director, new.cast, new.original_title, new.collection, new.keywords);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.pages, new.director, new.cast, new.original_title, new.collection, new.keywords);
         END;
     """
 
     _CREATE_TRIGGER_AD_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.director, old.cast, old.original_title, old.collection, old.keywords);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.pages, old.director, old.cast, old.original_title, old.collection, old.keywords);
         END;
     """
 
     _CREATE_TRIGGER_AU_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.director, old.cast, old.original_title, old.collection, old.keywords);
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.director, new.cast, new.original_title, new.collection, new.keywords);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.pages, old.director, old.cast, old.original_title, old.collection, old.keywords);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.pages, new.director, new.cast, new.original_title, new.collection, new.keywords);
         END;
     """
 
@@ -189,7 +191,8 @@ class HashDatabase:
         "ALTER TABLE files ADD COLUMN cast TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN original_title TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN collection TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN keywords TEXT DEFAULT '';"
+        "ALTER TABLE files ADD COLUMN keywords TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN pages INTEGER DEFAULT 0;"
     ]
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
@@ -254,12 +257,16 @@ class HashDatabase:
         
         # Verificación de integridad de FTS5 (Recrear si faltan nuevas columnas)
         try:
-            self._conn.execute("SELECT original_title, collection, keywords FROM files_fts LIMIT 1")
+            self._conn.execute("SELECT original_title, collection, keywords, pages FROM files_fts LIMIT 1")
         except sqlite3.OperationalError:
-            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas (original_title/collection/keywords)...")
+            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas (pages/original_title/collection/keywords)...")
             self._conn.execute("DROP TABLE IF EXISTS files_fts")
 
         self._conn.execute(self._CREATE_FTS_TABLE_SQL)
+        self._conn.execute("DROP TRIGGER IF EXISTS files_ai")
+        self._conn.execute("DROP TRIGGER IF EXISTS files_ad")
+        self._conn.execute("DROP TRIGGER IF EXISTS files_au")
+        
         self._conn.execute(self._CREATE_TRIGGER_AI_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AD_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AU_SQL)
@@ -628,7 +635,7 @@ class HashDatabase:
         all_params = []
 
         # Si hay texto, usamos FTS5 con pesos BM25 por columna (con author boost)
-        # Pesos de las columnas: file_name(1.5), official_title(2.0), author(3.0), languages(0.5), overview(1.0), overview_en(1.0), genres(0.8)
+        # Pesos de las columnas: file_name(1.5), official_title(2.0), author(3.0), languages(0.5), overview(1.0), overview_en(1.0), genres(0.8), pages(0.1)
         # El peso de 'author' es 3x para dar prioridad a búsquedas por nombre de creador.
         if text_query:
             sql_base += " JOIN files_fts fts ON f.id = fts.rowid"
@@ -646,9 +653,9 @@ class HashDatabase:
                 sql += " WHERE " + " AND ".join(where_clauses)
             
             # Ordenamos por BM25 con pesos (valores negativos: más negativo = más relevante)
-            # Pesos (importancia relativa): file_name, official_title, author, languages, overview, overview_en, genres, director, cast, original_title, collection, keywords
+            # Pesos (importancia relativa): file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords
             if text_query:
-                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8, 2.5, 1.2, 1.8, 2.2, 2.0) ASC"
+                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8, 0.1, 2.5, 1.2, 1.8, 2.2, 2.0) ASC"
             else:
                 sql += " ORDER BY f.processed_at DESC"
             
@@ -814,14 +821,21 @@ class HashDatabase:
     def sync_metadata_from_cache(self) -> int:
         """
         Backfill desde metadata_cache.
-        Extrae los campos 'overview', 'overview_en' y 'genres' del JSON almacenado en la caché
-        y los escribe en las columnas correspondientes de la tabla 'files'.
+        Extrae los campos enriquecidos (overview, genres, pages, cast, etc.) del JSON almacenado 
+        en la caché y los escribe en las columnas correspondientes de la tabla 'files'.
         
         Retorna el número de registros actualizados.
         """
         import json
         
         logger.info("[BACKFILL] Iniciando migración de metadatos desde la caché...")
+        
+        # Migración: Columna 'pages' (Fase 2.5)
+        try:
+            self._conn.execute("SELECT pages FROM files LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("[MIGRATE] Añadiendo columna 'pages' a la tabla files...")
+            self._conn.execute("ALTER TABLE files ADD COLUMN pages INTEGER")
         
         # 1. Obtenemos todos los registros de la caché que tienen metadatos
         cursor = self._conn.execute("SELECT ed2k_hash, metadata FROM metadata_cache")
@@ -836,6 +850,7 @@ class HashDatabase:
                 overview = meta.get("overview")
                 overview_en = meta.get("overview_en")
                 genres = meta.get("genres")
+                pages = meta.get("pages")
                 director = meta.get("director")
                 cast = meta.get("cast")
                 original_title = meta.get("original_title")
@@ -847,6 +862,7 @@ class HashDatabase:
                     overview = meta["api_data"].get("overview")
                     overview_en = meta["api_data"].get("overview_en")
                     genres = meta["api_data"].get("genres")
+                    pages = meta["api_data"].get("pages")
                     director = meta["api_data"].get("director")
                     cast = meta["api_data"].get("cast")
                     original_title = meta["api_data"].get("original_title")
@@ -857,21 +873,22 @@ class HashDatabase:
                 overview = overview if overview else ""
                 overview_en = overview_en if overview_en else ""
                 genres = genres if genres else ""
+                pages = int(pages) if pages else 0
                 director = director if director else ""
                 cast = cast if cast else ""
                 original_title = original_title if original_title else ""
                 collection = collection if collection else ""
                 keywords = keywords if keywords else ""
 
-                if overview or overview_en or genres or director or cast or original_title or collection or keywords:
+                if overview or overview_en or genres or pages or director or cast or original_title or collection or keywords:
                     # Actualizamos la tabla files para este hash
                     # Solo actualizamos si la columna está vacía para no sobrescribir datos ya existentes
                     sql = """
                         UPDATE files 
-                        SET overview = ?, overview_en = ?, genres = ?, director = ?, cast = ?, original_title = ?, collection = ?, keywords = ?
+                        SET overview = ?, overview_en = ?, genres = ?, pages = ?, director = ?, cast = ?, original_title = ?, collection = ?, keywords = ?
                         WHERE ed2k_hash = ? AND (overview = '' OR overview IS NULL)
                     """
-                    res = self._conn.execute(sql, (overview, overview_en, genres, director, cast, original_title, collection, keywords, ed2k_hash))
+                    res = self._conn.execute(sql, (overview, overview_en, genres, pages, director, cast, original_title, collection, keywords, ed2k_hash))
                     if res.rowcount > 0:
                         updated_count += res.rowcount
             except Exception as e:
@@ -934,22 +951,27 @@ class HashDatabase:
         duration = metadata.get("technical", {}).get("duration_sec", 0)
 
         # Query para actualizar (UPDATE) el registro
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
             UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, overview=?, overview_en=?, genres=?, director=?, cast=?, original_title=?, collection=?, keywords=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, pages=?, overview=?, overview_en=?, genres=?, director=?, cast=?, original_title=?, collection=?, keywords=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
              resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, 
-             api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), api_data.get("director", ""), api_data.get("cast", ""), 
+             api_data.get("pages"), api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), api_data.get("director", ""), api_data.get("cast", ""), 
              api_data.get("original_title", ""), api_data.get("collection", ""), api_data.get("keywords", ""), fingerprint, file_size)
         )
 
         # Confirma los cambios
         self._conn.commit()
         
+        if cursor.rowcount > 0:
+            logger.info(f"[DB] Metadatos persistidos correctamente ({cursor.rowcount} filas actualizadas).")
+        else:
+            logger.warning(f"[DB] No se actualizó ningún registro para {fingerprint[:8]} (posible desajuste de fingerprint/size).")
+
         logger.debug(f"[*]  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
 
         # Automatización del Embedding Semántico

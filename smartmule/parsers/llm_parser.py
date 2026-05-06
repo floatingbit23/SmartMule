@@ -14,28 +14,27 @@ logging.getLogger("google_genai.models").setLevel(logging.WARNING)
 
 # System Prompt base, enfocado en estructuración dura sin inventarse datos
 
-SYSTEM_PROMPT = """Eres un experto en extracción de metadatos de archivos de internet. 
-Tu tarea es analizar el nombre "sucio" de un archivo descargado (con el que se llama al descargar mediante redes P2P) y extraer su metadata estructurada en formato JSON puro. 
+SYSTEM_PROMPT = """Eres un experto en extracción de metadatos de cine y literatura. 
+Tu tarea es analizar el nombre "sucio" de un archivo descargado de redes P2P y extraer su metadata estructurada en JSON puro.
 
-Reglas:
-1. Elimina etiquetas inútiles: x264, x265, HEVC, AC3, HDRip, WEB-DL, Dual, Spanish, Castellano, subs, uploader name, by mDudikoff, etc.
-2. Elimina etiquetas de edición: Remastered, Remaster, V-A, Director's Cut, Extended, Uncut, etc. Estas NO son parte del título.
-3. Identifica correctamente la calidad ("quality") si está presente (1080p, 720p, 4K, 2160p, UHD, 480p).
-4. Detecta "season" y "episode" si es una serie. Usa números enteros.
-5. Identifica "year" si existe. Usa número entero. Para libros, música y cine, proporciona el año de publicación/estreno original de la obra si lo conoces, aunque no esté en el nombre del archivo.
-6. Extrae el "author" o artista si está presente y es relevante.
-7. Si sospechas que la obra es una traducción o tiene un título original en inglés (muy común en libros y música), proporciona el "original_title" en inglés.
-8. "media_type" debe ser exactamente uno de los siguientes strings: "video", "series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
-9. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown (```json). No agregues texto adicional.
+Reglas prioritarias:
+1. Identifica el Título Real: Si hay traducciones (ej: 'L'Ultima Missione'), sepáralas y devuelve preferiblemente el título original o internacional (ej: 'Project Hail Mary') en el campo "title".
+2. Limpieza Radical: Elimina cualquier rastro de calidad (720p, 1080p), idiomas (ITA, AAC, Spanish, Castellano), o grupos de ripeo/etiquetas de escena (KVM, mDudikoff, WEB-DL, x264, x265, HEVC).
+3. Formato de Salida: Devuelve exclusivamente el Título Limpio y el Año por separado. No inventes datos si no los conoces.
+
+Reglas técnicas y de estructura:
+4. Elimina etiquetas de edición (Remastered, Director's Cut, Extended, Uncut) que NO son parte del título.
+5. Identifica correctamente la calidad ("quality") si está presente.
+6. Detecta "season" y "episode" si es una serie (números enteros).
+7. "media_type" debe ser exactamente uno de: "video", "series", "movie", "book", "audio", "software", "games", "documents", "image", "subtitles", o "unknown".
+8. Proporciona el "original_title" si el título principal es una traducción.
+9. Devuelve UNICAMENTE un bloque JSON válido, sin delimitadores de markdown. No agregues texto adicional.
 
 Ejemplo 1: "The.Office.S03E05.1080p.HEVC.x265.mkv"
 {"title": "The Office", "author": null, "original_title": null, "media_type": "series", "season": 3, "episode": 5, "quality": "1080p", "year": 2005}
 
-Ejemplo 2: "[Legendarium] Tolkien - El fin de la Tercera Edad.epub"
-{"title": "El fin de la Tercera Edad", "author": "J. R. R. Tolkien", "original_title": "The End of the Third Age", "media_type": "book", "season": null, "episode": null, "quality": null, "year": 1996}
-
-Ejemplo 3: "Manual_Usuario_v1.0.doc"
-{"title": "Manual Usuario v1.0", "author": null, "original_title": null, "media_type": "documents", "season": null, "episode": null, "quality": null, "year": null}
+Ejemplo 2: "L.Ultima.Missione - Project.Hail.Mary.2026.KVM.mkv"
+{"title": "Project Hail Mary", "author": null, "original_title": "Project Hail Mary", "media_type": "movie", "season": null, "episode": null, "quality": "WEB-DL", "year": 2026}
 """
 
 # Función principal que recibe el nombre y opcionalmente contexto técnico de Regex
@@ -95,15 +94,70 @@ def _call_gemini(filename: str, extra_context: str = "") -> dict:
 
             error_msg = str(e)
 
-            # Si es un error 503 (Servicio no disponible/Sobrecarga), reintentamos
-            if "503" in error_msg and attempt < max_retries - 1:
-                logger.warning(f"[WARN]  Gemini sobrecargado (503). Reintentando en {retry_delay}s... (Intento {attempt + 1}/{max_retries})")
-                time.sleep(retry_delay)
+            # Si es un error 503 (Servicio no disponible) o 429 (Cuota agotada), reintentamos
+            if any(code in error_msg for code in ["503", "429", "RESOURCE_EXHAUSTED"]) and attempt < max_retries - 1:
+                wait_time = retry_delay
+                
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    # La cuota gratuita suele requerir esperas más largas
+                    wait_time = max(15, retry_delay)
+                    logger.warning(f"[WARN]  Cuota de Gemini agotada (429). Esperando {wait_time}s para reintentar... (Intento {attempt + 1}/{max_retries})")
+                else:
+                    logger.warning(f"[WARN]  Gemini sobrecargado (503). Reintentando en {wait_time}s... (Intento {attempt + 1}/{max_retries})")
+                
+                time.sleep(wait_time)
                 retry_delay *= 2 # Backoff exponencial simple
                 continue
             
             logger.error(f"[ERR] Error en Gemini (google-genai): {e}")
             return {"title": filename, "confidence": "failed", "error": error_msg}
+
+
+def analyze_media_content(title: str, author: str = None, media_type: str = "book") -> dict:
+    
+    """
+    Usa la IA como respaldo para generar una sinopsis y metadatos enriquecidos 
+    si las APIs oficiales (OpenLibrary/TMDB) no tienen información.
+    """
+    
+    prompt = f"""Proporciona información detallada sobre esta obra:
+    Título: {title}
+    {f'Autor: {author}' if author else ''}
+    Tipo: {media_type}
+
+    Devuelve un JSON con:
+    - "overview": Una sinopsis o resumen de la trama (en español, max 300 palabras).
+    - "cast": Lista de personajes principales (si es ficción) o temas clave (si es ensayo/técnico).
+    - "collection": Nombre de la saga o colección a la que pertenece (si aplica).
+    - "keywords": 5-8 etiquetas descriptivas.
+
+    JSON puro, sin markdown."""
+
+    try:
+        if USE_LOCAL_LLM:
+            client = openai.OpenAI(base_url=LOCAL_LLM_URL, api_key=LMSTUDIO_API_KEY)
+            response = client.chat.completions.create(
+                model="local-model",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw_text = response.choices[0].message.content
+        else:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model='gemini-flash-latest', 
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
+            )
+            raw_text = response.text
+
+        # Limpieza básica por si el modelo no respeta el JSON puro
+        if "```json" in raw_text:
+            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        
+        return json.loads(raw_text)
+    except Exception as e:
+        logger.error(f"[ERR] Error al generar descripción por IA: {e}")
+        return {}
 
 
 def _call_local_llm(filename: str, extra_context: str = "") -> dict:

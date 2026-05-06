@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from smartmule.parsers.regex_parser import parse_filename, EXTENSION_MAPPING
-from smartmule.parsers.llm_parser import parse_with_llm
+from smartmule.parsers.llm_parser import parse_with_llm, analyze_media_content
 from smartmule.parsers.media_inspector import inspect_media_file
 from smartmule.api.tmdb_client import TMDBClient
 from smartmule.api.openlibrary_client import OpenLibraryClient
@@ -362,95 +362,94 @@ class MetadataEngine:
                     res_id = res.get("id")
 
                     if res_id:
-
+                        # Pedimos el runtime para desempatar (solo necesitamos este dato aquí)
                         if data.get("season"):
                             # Pedimos detalles en inglés para obtener runtime y sinopsis original
                             details = self.tmdb.get_tv_details(res_id, language="en-US")
+                            
+                            durations = details.get("episode_run_time", []) if details else []
 
-                            # En series, TMDB devuelve una lista de duraciones de episodio
-                            durations = details.get("episode_run_time", [])
                             api_runtime = durations[0] if durations else 0
                         else:
                             # Pedimos detalles en inglés para obtener runtime y sinopsis original
                             details = self.tmdb.get_movie_details(res_id, language="en-US")
-                            api_runtime = details.get("runtime", 0)
-
-                        # Guardamos la sinopsis en inglés en el objeto de resultado para usarla después
-                        if details:
-                            res["overview_en"] = details.get("overview")
-                        
-                        # --- MEJORA: Obtención de Director ---
-                        if res_id:
-
-                            media_credits = None
-
-                            if data.get("season"):
-                                media_credits = self.tmdb.get_tv_credits(res_id)
-                            else:
-                                media_credits = self.tmdb.get_movie_credits(res_id)
-                            
-                            if media_credits:
-
-                                # En películas, buscamos Job: 'Director'
-                                # En series, TMDB suele poner a los creadores en 'created_by' en details, pero también hay directores en crew de episodios (complejo). 
-                                
-                                # Por ahora, buscamos Directores en crew general.
-                                directors = [member.get("name") for member in media_credits.get("crew", []) if member.get("job") == "Director"]
-                                
-                                if directors:
-                                    res["director"] = ", ".join(directors)
-
-                                elif data.get("season"):
-                                    # Fallback para series: Creadores (desde 'details' si están ahí)
-                                    creators = details.get("created_by", [])
-                                    if creators:
-                                        res["director"] = ", ".join([c.get("name") for c in creators])
-
-                                # Obtención de Actores (Cast)
-                                cast_list = media_credits.get("cast", [])
-                                top_actors = [member.get("name") for member in cast_list[:10]] # Tomamos los 10 principales
-                                if top_actors:
-                                    res["cast"] = ", ".join(top_actors)
-
-                                # Obtención de Keywords (Etiquetas temáticas)
-                                keywords_data = None
-                                if data.get("season"):
-                                    keywords_data = self.tmdb.get_tv_keywords(res_id)
-                                    if keywords_data:
-                                        keywords_list = [k.get("name") for k in keywords_data.get("results", [])]
-                                        res["keywords"] = ", ".join(keywords_list)
-                                else:
-                                    keywords_data = self.tmdb.get_movie_keywords(res_id)
-                                    if keywords_data:
-                                        keywords_list = [k.get("name") for k in keywords_data.get("keywords", [])]
-                                        res["keywords"] = ", ".join(keywords_list)
-
-                                # Título Original y Colección
-                                res["original_title"] = details.get("original_title") or details.get("original_name", "")
-                                
-                                if not data.get("season"):
-                                    collection = details.get("belongs_to_collection")
-                                    if collection and isinstance(collection, dict):
-                                        res["collection"] = collection.get("name", "")
+                            api_runtime = details.get("runtime", 0) if details else 0
                         
                         if api_runtime > 0:
-
                             diff = abs(file_dur_min - api_runtime)
-
-                            if diff <= 5: # Margen de 5 minutos (créditos, intros, etc.)
+                            if diff <= 5: # Margen de 5 minutos
                                 score += 40
                                 logger.info(f"[MATCH] Duración coincide ({api_runtime} min). Bonus +40.")
-
                             elif diff <= 15:
                                 score += 15
                                 logger.debug(f"[DIFF] Duración cercana ({api_runtime} min). Bonus +15.")
-                
+
                 if score > best_score:
                     best_score = score
                     best_match = res 
 
-            # Actualizamos los datos de la película con la mejor coincidencia
+            # ================= ENRIQUECIMIENTO PROFUNDO DEL GANADOR =================
+            # Ahora que tenemos el mejor resultado, nos aseguramos de que tenga TODOS los datos
+            # aunque no hayamos entrado en el bloque de Tie-Breaking por duración.
+            
             api_result = best_match
+            res_id = api_result.get("id")
+
+            if res_id:
+                logger.info(f"[API] Enriqueciendo ficha completa para ID: {res_id}...")
+                
+                # 1. Detalles base (Runtime, Colección, Título Original, Sinopsis EN)
+                if data.get("season"):
+                    details = self.tmdb.get_tv_details(res_id, language="en-US")
+                else:
+                    details = self.tmdb.get_movie_details(res_id, language="en-US")
+                
+                if details:
+                    api_result["overview_en"] = details.get("overview")
+                    api_result["original_title"] = details.get("original_title") or details.get("original_name", "")
+                    
+                    if not data.get("season"):
+                        collection = details.get("belongs_to_collection")
+                        if collection and isinstance(collection, dict):
+                            api_result["collection"] = collection.get("name", "")
+
+                # 2. Créditos (Director y Reparto)
+                media_credits = None
+                if data.get("season"):
+                    media_credits = self.tmdb.get_tv_credits(res_id)
+                else:
+                    media_credits = self.tmdb.get_movie_credits(res_id)
+                
+                if media_credits:
+                    
+                    # Buscamos Directores
+                    directors = [m.get("name") for m in media_credits.get("crew", []) if m.get("job") == "Director"]
+                    if directors:
+                        api_result["director"] = ", ".join(directors)
+                    elif data.get("season") and details:
+                        # Fallback series: Creadores
+                        creators = details.get("created_by", [])
+                        if creators:
+                            api_result["director"] = ", ".join([c.get("name") for c in creators])
+
+                    # Actores
+                    cast_list = media_credits.get("cast", [])
+                    top_actors = [m.get("name") for m in cast_list[:10]]
+                    if top_actors:
+                        api_result["cast"] = ", ".join(top_actors)
+
+                # 3. Keywords
+                keywords_data = None
+                if data.get("season"):
+                    keywords_data = self.tmdb.get_tv_keywords(res_id)
+                    if keywords_data:
+                        k_list = [k.get("name") for k in keywords_data.get("results", [])]
+                        api_result["keywords"] = ", ".join(k_list)
+                else:
+                    keywords_data = self.tmdb.get_movie_keywords(res_id)
+                    if keywords_data:
+                        k_list = [k.get("name") for k in keywords_data.get("keywords", [])]
+                        api_result["keywords"] = ", ".join(k_list)
             poster = f"https://image.tmdb.org/t/p/w500{api_result.get('poster_path')}" if api_result.get("poster_path") else None
             
             # --- MEJORA: Actualizamos el tipo de medio oficial ---
@@ -588,16 +587,33 @@ class MetadataEngine:
                 else:
                     data["author"] = api_author
 
-                # --- Fase de Enriquecimiento profundo (Sinopsis, Personajes, Lugares) ---
+                # --- Fase de Enriquecimiento profundo (Sinopsis, Personajes, Lugares, Sagas) ---
                 work_key = api_result.get("key")
                 details = self.openlibrary.get_book_details(work_key) if work_key else {}
 
-                # Combinamos temas, personajes y lugares para un índice de búsqueda ultra-rico
-                subjects = api_result.get("subject", [])[:5]
-                people = details.get("people", [])[:5]
-                places = details.get("places", [])[:5]
-                all_tags = list(dict.fromkeys(subjects + people + places)) # Eliminamos duplicados manteniendo orden
+                # Combinamos temas, personajes y lugares
+                subjects = api_result.get("subject", [])
+                people = details.get("people", [])
+                places = details.get("places", [])
                 
+                # Intentamos detectar la Saga/Serie (Heurística sobre temas)
+                collection = ""
+
+                for s in subjects:
+
+                    s_low = s.lower()
+
+                    if "series" in s_low or "saga" in s_low or "sequence" in s_low:
+                        # Limpieza básica de etiquetas comunes de OpenLibrary
+                        collection = s.replace("(Book Series)", "").replace("(book series)", "").strip()
+                        break
+
+                # Limitamos elementos para el campo de géneros/tags
+                display_subjects = subjects[:10]
+                display_people = people[:10]
+                display_places = places[:10]
+                
+                all_tags = list(dict.fromkeys(display_subjects + display_people + display_places))
                 genres_str = ", ".join(all_tags)
 
                 # Normalización de Score (OpenLibrary es rango 0-5 -> pasamos a rango 0-10)
@@ -628,15 +644,38 @@ class MetadataEngine:
                     elif isinstance(raw_pages, (int, float)):
                         pages = int(raw_pages)
 
+                # --- IA de Respaldo (Si OpenLibrary no tiene sinopsis/personajes) ---
+                
+                overview = details.get("description") or api_result.get("overview", "")
+                
+                if not overview or len(overview) < 10:
+                    logger.info("    [AI] OpenLibrary sin sinopsis. Invocando IA de refuerzo...")
+                    ai_enrich = analyze_media_content(data["title"], data["author"], media_type="book")
+                    
+                    if ai_enrich:
+                        overview = ai_enrich.get("overview", overview)
+                        if not display_people: 
+                            display_people = ai_enrich.get("cast", [])
+                            if isinstance(display_people, str): display_people = [display_people]
+                        if not collection: collection = ai_enrich.get("collection", "")
+                        if not display_places: display_places = ai_enrich.get("keywords", [])
+                        
+                        # Re-generamos géneros si la IA nos dio nuevos datos
+                        all_tags = list(dict.fromkeys(display_subjects + display_people + display_places))
+                        genres_str = ", ".join(all_tags)
+
                 data["api_data"] = {
                     "source": "OpenLibrary",
                     "official_title": data["title"],
                     "author": data["author"],
                     "date": final_year,
                     "score": norm_score,
-                    "overview": details.get("description", ""),
+                    "overview": overview,
                     "genres": genres_str,
-                    "pages": pages
+                    "pages": pages,
+                    "cast": ", ".join(display_people[:10]) if isinstance(display_people, list) else str(display_people),
+                    "keywords": ", ".join(display_places[:10]) if isinstance(display_places, list) else str(display_places),
+                    "collection": collection
                 }
 
 
@@ -857,6 +896,18 @@ class MetadataEngine:
 
                 if ad.get("url"):
                     logger.info(f"    - Informe VT: {ad['url']}")
+
+            # Metadatos Enriquecidos (Extra)
+            if ad.get("overview"):
+                logger.info(f"    - Sinopsis: {ad['overview'][:120]}...")
+            if ad.get("cast"):
+                label = "Personajes" if data.get("media_type") == "book" else "Reparto"
+                logger.info(f"    - {label}: {ad['cast']}")
+            if ad.get("collection"):
+                logger.info(f"    - Colección: {ad['collection']}")
+            if ad.get("keywords"):
+                label = "Lugares/Tags" if data.get("media_type") == "book" else "Keywords"
+                logger.info(f"    - {label}: {ad['keywords']}")
         else:
             logger.info("[WARN] No se obtuvieron metadatos oficiales de las APIs.")
 
