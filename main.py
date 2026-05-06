@@ -933,8 +933,6 @@ EJEMPLOS DE USO:
 
     # 0. Override de Base de Datos (Si se proporciona)
     if args.db:
-        # Importamos Path aquí para evitar problemas circulares o si no estuviera disponible
-        from pathlib import Path
         global DB_PATH
         DB_PATH = Path(args.db)
         # También actualizamos el logger para indicar que usamos otra DB
