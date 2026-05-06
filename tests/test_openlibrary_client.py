@@ -21,10 +21,11 @@ def test_search_book_success(mock_get, ol_client):
     }
     mock_get.return_value = mock_response
 
-    result = ol_client.search_book("El Señor de los Anillos")
+    result = ol_client.search_books("El Señor de los Anillos")
     assert result is not None
-    assert result["title"] == "El Señor de los Anillos"
-    assert result["author_name_str"] == "J. R. R. Tolkien"
+    assert len(result) > 0
+    assert result[0]["title"] == "El Señor de los Anillos"
+    assert result[0]["author_name_str"] == "J. R. R. Tolkien"
     mock_get.assert_called_once()
 
 @patch('smartmule.api.openlibrary_client.requests.get')
@@ -34,5 +35,5 @@ def test_search_book_empty(mock_get, ol_client):
     mock_response.json.return_value = {"docs": []}
     mock_get.return_value = mock_response
 
-    result = ol_client.search_book("Non Existing Book ZZZZ")
-    assert result is None
+    result = ol_client.search_books("Non Existing Book ZZZZ")
+    assert result == []

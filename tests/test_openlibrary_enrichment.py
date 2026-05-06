@@ -52,12 +52,12 @@ def test_openlibrary_integration_flow(temp_db):
     }
 
     with patch("smartmule.metadata_engine.parse_filename") as mock_regex, \
-         patch("smartmule.api.openlibrary_client.OpenLibraryClient.search_book") as mock_search, \
+         patch("smartmule.api.openlibrary_client.OpenLibraryClient.search_books") as mock_search, \
          patch("smartmule.api.openlibrary_client.OpenLibraryClient.get_book_details") as mock_details:
         
         # Configuramos los mocks
         mock_regex.return_value = {"title": "The Hobbit", "confidence": "high", "media_type": "book"}
-        mock_search.return_value = mock_search_result
+        mock_search.return_value = [mock_search_result]
         mock_details.return_value = mock_details_result
 
         # 1. Ejecutamos la identificación (esto disparará las dos llamadas a la API)
