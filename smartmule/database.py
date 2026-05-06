@@ -132,6 +132,18 @@ class HashDatabase:
     """
 
 
+    # --- MOTOR DE BÚSQUEDA SEMÁNTICA (VECTORIAL EMBEDDINGS) ---
+    _CREATE_EMBEDDINGS_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS media_embeddings (
+            file_id       INTEGER PRIMARY KEY, -- ID del archivo referenciado a files.id
+            embedding     BLOB NOT NULL, -- Vector de embeddings (BLOB=Binary Large Object)
+            metadata_text TEXT NOT NULL, -- Texto del archivo para búsqueda semántica
+            model_name    TEXT NOT NULL, -- Modelo de embeddings
+            created_at    TEXT NOT NULL, -- Fecha en la que se creó
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE -- En caso de que el archivo sea eliminado, se elimina también su embedding
+        );
+    """
+
     # Migraciones para añadir columnas a bases de datos antiguas de forma segura
     _MIGRATIONS = [
         "ALTER TABLE files ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
@@ -181,7 +193,8 @@ class HashDatabase:
         # Esto permite que el Watcher y el Worker operen simultáneamente sin bloqueos 'database is locked'.
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
-
+        self._conn.execute("PRAGMA foreign_keys = ON;") # Para relaciones entre tablas.
+ 
         # Devuelvo filas personalizadas que se comportan como diccionarios. Esto facilita el acceso por nombre de columna
         self._conn.row_factory = sqlite3.Row
 
@@ -214,6 +227,9 @@ class HashDatabase:
         self._conn.execute(self._CREATE_TRIGGER_AI_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AD_SQL)
         self._conn.execute(self._CREATE_TRIGGER_AU_SQL)
+
+        # Motor de búsqueda semántica (Embeddings)
+        self._conn.execute(self._CREATE_EMBEDDINGS_TABLE_SQL)
 
 
         # 4º. POBLADO INICIAL (MIGRACIÓN): Sincroniza archivos preexistentes con el índice FTS5.
@@ -881,13 +897,15 @@ class HashDatabase:
 
         """
         Devuelve un resumen estadístico: total de archivos, conteo por categoría y tamaño acumulado.
+        Incluye también el conteo de archivos vectorizados para la búsqueda semántica.
         """
         
         stats = {
             "total": 0,
             "total_size": 0,
             "categories": {},
-            "category_sizes": {}
+            "category_sizes": {},
+            "vectorized_count": 0
         }
 
         try:
@@ -902,6 +920,10 @@ class HashDatabase:
             for row in cursor.fetchall():
                 stats["categories"][row[0]] = row[1]
                 stats["category_sizes"][row[0]] = row[2] or 0
+            
+            # 3. Obtener el conteo de archivos vectorizados (Búsqueda Semántica)
+            cursor = self._conn.execute("SELECT COUNT(*) FROM media_embeddings")
+            stats["vectorized_count"] = cursor.fetchone()[0]
             
         except Exception as e:
             logger.error(f"[ERR]  Error al obtener estadísticas de la BBDD: {e}")
@@ -947,6 +969,34 @@ class HashDatabase:
             logger.debug(f"[SAVE] Metadatos cacheados para hash {ed2k_hash}")
         except Exception as e:
             logger.error(f"[ERR]  Error guardando en metadata_cache para {ed2k_hash}: {e}")
+
+
+    def _save_embedding(self, file_id: int, embedding_blob: bytes, metadata_text: str, model_name: str) -> None:
+
+        """
+        Método privado que guarda un vector de embedding asociado a un archivo. 
+        Almacena los vectores serializados de forma eficiente (float32 binario).
+        Cada archivo ocupa solo ~1.5KB (384 dimensiones del vector * 4 bytes).
+        """
+
+        # Query para insertar o reemplazar el embedding
+        sql = """
+            INSERT OR REPLACE INTO media_embeddings (file_id, embedding, metadata_text, model_name, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """
+
+        # Timestamp de creación del embedding (para saber cuánto tiempo lleva sin usarse)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S") # Formato legible: Ejemplo -> 2026-04-28 23:30:26
+
+        try:
+            # Ejecución de la query SQL
+            self._conn.execute(sql, (file_id, embedding_blob, metadata_text, model_name, now_str))
+            self._conn.commit()
+
+            logger.debug(f"[SAVE] Embedding vectorial guardado para ID {file_id}")
+
+        except Exception as e:
+            logger.error(f"[ERR]  Error guardando embedding para ID {file_id}: {e}")
 
 
     # Función de cierre de la BBDD SQLite

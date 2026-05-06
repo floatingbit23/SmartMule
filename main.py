@@ -613,6 +613,10 @@ def show_stats() -> None:
                 cat_bytes = stats["category_sizes"].get(cat, 0)
                 print(f"     {icon} {cat.capitalize()}: {count} ({format_size(cat_bytes)})")
         
+        # Estado de la Búsqueda Semántica
+        if stats.get("vectorized_count", 0) > 0:
+            print(f"\n  🧠 Búsqueda Semántica: {stats['vectorized_count']} archivos vectorizados.")
+        
         print("===================================================\n")
 
     except Exception as e:
@@ -644,14 +648,26 @@ def show_config() -> None:
     
     print("\n🤖 INTELIGENCIA ARTIFICIAL:")
 
-    # Si se usa el LLM local, se muestra su URL. Si no, se muestra que se está usando Gemini.
-   
+    # LLM (Clasificación y Metadatos)
     status_llm = "✅  ACTIVO (Local)" if config.USE_LOCAL_LLM else "☁️  CLOUD (Gemini)"
-    
-    print(f"   - Modo IA: {status_llm}")
-
+    print("   🧠 LLM (Clasificación):")
+    print(f"     - Proveedor de IA actual: {status_llm}")
     if config.USE_LOCAL_LLM:
-        print(f"   - URL Local:  {config.LOCAL_LLM_URL}")
+        print(f"     - URL Local: {config.LOCAL_LLM_URL}")
+    else:
+        print(f"     - URL Local (NO DISPONIBLE EN CONFIG ACTUAL): {config.LOCAL_LLM_URL}")
+    
+    # 2. Búsqueda Semántica (Embeddings)
+    from smartmule import embeddings
+
+    emb_info = embeddings.get_model_info()
+
+    print("\n   🔍 Búsqueda Semántica:")
+    print(f"     - Modelo: {emb_info['model']}") # Modelo seleccionado para busqueda semantica
+    print(f"     - Cuantización: {emb_info['quantization']}") # q / ft32
+    
+    if emb_info['dim'] != "Unknown":
+        print(f"     - Dimensiones del embedding: {emb_info['dim']}")
     
     print("\n🔑  API KEYS (Estado):")
     
@@ -706,6 +722,11 @@ def show_status() -> None:
     check_tool("FFmpeg", "ffprobe")
     check_tool("7-Zip", "7z")
     
+    # 2.1 Búsqueda Semántica
+    from smartmule import embeddings
+    sem_status = "✅  INSTALADO" if embeddings.is_available() else "❌  NO INSTALADO -> [i] Su instalación es opcional."
+    print(f"   - Motor para Búsquedas Semánticas de Archivos:  {sem_status}")
+
     # 3. Verificación de Rutas y Permisos
     print("\n📂  ESTADO DE RUTAS:")
     def check_path(name, path):

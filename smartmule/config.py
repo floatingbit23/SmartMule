@@ -130,6 +130,15 @@ LOCAL_LLM_URL: str = "http://127.0.0.1:1234/v1"
 
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
+# Modelo de embeddings multilingüe (ONNX) para búsqueda semántica
+EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+
+# Nivel de Cuantización del modelo de embeddings:
+# Default: Usa la precisión por defecto (generalmente FP32 o FP16 según el entorno)
+# 8-bit:   Cuantización a 8 bits (reduce el uso de VRAM/RAM, pierde algo de precisión)
+# 4-bit:   Cuantización a 4 bits (reduce mucho el uso de VRAM/RAM, mayor pérdida de precisión)
+EMBEDDING_QUANTIZATION: str = os.getenv("EMBEDDING_QUANTIZATION", "Default")
+
 class ColoredFormatter(logging.Formatter):
     """
     Formateador de logs que añade colores ANSI según el nivel y el contenido.

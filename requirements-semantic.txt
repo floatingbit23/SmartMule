@@ -1,0 +1,9 @@
+# === SmartMule Semantic Search (Opcional, ~300MB) ===
+
+# Instalar con: pip install -r requirements-semantic.txt
+
+# Motor de embeddings ligero (ONNX Runtime, sin PyTorch)
+fastembed>=0.4.0
+
+# Librería NumPy para cálculo vectorial eficiente  
+numpy>=1.24.0
