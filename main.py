@@ -41,6 +41,7 @@ from smartmule.config import (
     FILE_LOCK_TIMEOUT, # Tiempo máximo de espera por bloqueos de I/O
     setup_logging, # Inicializador de logs
     validate_paths, # Verificador de estructura de carpetas
+    EMBEDDING_MODEL, # Modelo de embeddings actual
 )
 from smartmule.database import HashDatabase # Gestor de la caché de metadatos
 from smartmule.queue_manager import QueueManager # Gestor de la cola de procesamiento
@@ -299,62 +300,103 @@ def _process_deletions(to_delete: list, db: HashDatabase, no_preserve: bool) -> 
 def search_files(query: str) -> None:
 
     """
-    Usa el motor de búsqueda inteligente (FTS5) para mostrar resultados en consola.
+    Motor de búsqueda híbrido avanzado. 
+    Combina FTS5 (Keywords) con Búsqueda Semántica (IA) usando el algoritmo Weighted RRF (Weighted Reciprocal Rank Fusion).
     """
 
-    print(f"\n[SEARCH] Buscando: '{query}'...")
+    from smartmule.embeddings import is_available
     
-    # Me conecto a la base de datos
+    # Verificamos si el motor de IA está listo
+    semantic_ready = is_available()
+    engine_label = "Híbrido (AI+FTS5)" if semantic_ready and query.strip() else "Léxico (FTS5)"
+    
+    print(f"\n[SEARCH] Buscando: '{query}'")
+    print(f"[ENGINE] Motor: {engine_label}")
+    
     db = HashDatabase(DB_PATH)
     
+    # Comprobamos si el modelo ha cambiado (Detección de Modelo Cambiado)
+    if semantic_ready and db.check_embedding_model_mismatch(EMBEDDING_MODEL):
+        print("\n[!] ADVERTENCIA: El modelo de embeddings ha cambiado!")
+        print("    Los resultados semánticos pueden ser inexactos o incompletos.")
+        print("    Ejecuta: smartmule --build-index para actualizar el índice.\n")
+    
     try:
-        # Buscamos archivos usando el término de búsqueda.
-        results = db.search_by_name(query)
+        # Si hay motor semántico y hay texto en la query, usamos Hybrid Search (Weighted RRF)
+        if semantic_ready and query.strip():
+            results = db.search_hybrid(query)
+        else:
+            # Fallback a búsqueda clásica (FTS5 / Regex / Fuzzy)
+            results = db.search_by_name(query)
         
         if not results:
             if not query:
-                print("\n[i] No tienes archivos registrados en la base de datos de SmartMule!\n")
+                print("\n[i] No hay archivos registrados en la biblioteca.\n")
             else:
-                print("\n[!] No se encontraron archivos que cumplan esos criterios.\n")
+                print("\n[!] No se encontraron coincidencias para los criterios indicados.\n")
             return
 
         print(f"\n[OK] Se han encontrado {len(results)} coincidencia(s):\n")
 
-        # Cabecera de la tabla de resultados (Ajustada para incluir resolución en TIPO)
-        print(f"{'ID':<4} | {'TIPO':<18} | {'TÍTULO / NOMBRE DE ARCHIVO':<47} | {'SCORE':<6} | {'ESTADO'}")
-        
-        # Separador
-        print("-" * 100)
+        # Cabecera de la tabla (Ajustada para mayor claridad)
+        print(f"{'ID':<4} | {'TIPO':<18} | {'TÍTULO / NOMBRE DE ARCHIVO':<38} | {'MATCH':<10} | {'SCORE':<7} | {'ESTADO'}")
+        print("-" * 105)
 
         for item in results:
-
             media_type = item.get('media_type', 'unknown').upper()
-            
-            # Mostramos la resolución solo para los tipos de vídeo ("MOVIE", "SERIES", "VIDEO")
             res = item.get('resolution')
-
+            
             if media_type in ["MOVIE", "SERIES", "VIDEO"] and res:
                 media_type = f"{media_type} ({res})"
 
             title = item.get('official_title') or item.get('file_name', 'Unknown')
 
-            # Visualización de puntuación con 2 decimales para evitar discrepancias con los filtros
-            val = item.get('score', 0.0)
-            score = f"{val:.2f}" if item.get('score') is not None else "N/A"
+            # Visualización del origen del match
+            origin = item.get('search_origin', 'TEXT').upper()
+            if origin == 'HYBRID':
+                match_ui = "🧠+📝" # Híbrido
+            elif origin == 'SEMANTIC':
+                match_ui = "🧠 AI"
+            else:
+                match_ui = "📝 TEXT"
 
-            status = "ORG" if item.get('is_organized') else "PEN"
+            status = "✅ ORG" if item.get('is_organized') else "⏳ PEN"
             
-            # Truncamos el título si es muy largo
-            if len(title) > 44:
-                title = title[:41] + "..."
+            # Normalización DINÁMICA del score a escala 0-100
+            # Usamos el máximo real observado en el resultado set en lugar del máximo teórico.
+            
+            # Esto hace que el #1 siempre sea 100/100 (híbrido) o 50/100 (solo semántico),
+            # y el resto se escale proporcionalmente — distribución clara y legible para el usuario.
+            rrf_val = item.get('relevance_score', 0)
+            max_observed = item.get('max_observed_score', rrf_val) or rrf_val or 1.0
+            
+            if origin == 'HYBRID':
+                # El ganador híbrido escala a 100, el resto proporcionalmente
+                score_100 = min(100.0, (rrf_val / max_observed) * 100.0)
+            elif origin == 'SEMANTIC':
+                # Semántico puro: escala a máx 50 (deja espacio para FTS en caso de empate)
+                score_100 = min(50.0, (rrf_val / max_observed) * 50.0)
+            else: # FTS puro
+                # FTS puro: escala a máx 50
+                score_100 = min(50.0, (rrf_val / max_observed) * 50.0)
+            
+            # Aplicamos colores según el score (Semáforo: Verde >85, Rojo <25, Amarillo resto)
+            if score_100 > 85:
+                score_ui = f"\033[92m{score_100:3.0f}/100\033[0m" # Verde
+            elif score_100 < 25:
+                score_ui = f"\033[91m{score_100:3.0f}/100\033[0m" # Rojo
+            else:
+                score_ui = f"\033[93m{score_100:3.0f}/100\033[0m" # Amarillo
+
+            if len(title) > 35:
+                title = title[:32] + "..."
                 
-            print(f"{item['id']:<4} | {media_type:<18} | {title:<47} | {score:<6} | {status}")
+            print(f"{item['id']:<4} | {media_type:<18} | {title:<38} | {match_ui:<10} | {score_ui:<7} | {status}")
             
-        print(f"\n[DONE] Total: {len(results)} archivos encontrados.\n")
+        print(f"\n[DONE] Mostrando {len(results)} resultados ordenados por relevancia (Weighted RRF Score).\n")
 
     except Exception as e:
         print(f"\n[ERR] Error durante la búsqueda: {e}\n")
-        
     finally:
         db.close()
 
@@ -616,6 +658,10 @@ def show_stats() -> None:
         # Estado de la Búsqueda Semántica
         if stats.get("vectorized_count", 0) > 0:
             print(f"\n  🧠 Búsqueda Semántica: {stats['vectorized_count']} archivos vectorizados.")
+            
+            # Verificamos mismatch de modelo (Detección de Modelo Cambiado - Fase 2.4)
+            if db.check_embedding_model_mismatch(EMBEDDING_MODEL):
+                print("     ⚠️  ADVERTENCIA: El modelo ha cambiado. Ejecuta --build-index")
         
         print("===================================================\n")
 
@@ -808,7 +854,7 @@ COMANDOS DE SERVICIO:
   restart           Reinicia el servicio SmartMule (Stop + Start).
 
 HERRAMIENTAS DE BÚSQUEDA:
-  --search [query]  Realiza una búsqueda inteligente (FTS5) y filtrada en la biblioteca.
+  --search [query]  Búsqueda Híbrida Inteligente (Semántica + Léxica) en la biblioteca.
   --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
   --reprocess [q]   Invalida metadatos para forzar un nuevo análisis (Regex/IA/API).
     --all                 (Purga/Reprocess) Selecciona automáticamente todos los resultados.
@@ -816,6 +862,7 @@ HERRAMIENTAS DE BÚSQUEDA:
 
 HERRAMIENTAS ADMINISTRATIVAS:
   --stats           Muestra un resumen detallado e inventario de la biblioteca.
+  --build-index     Genera embeddings semánticos para toda la biblioteca.
   --config          Muestra la configuración activa (rutas, APIs, etc.).
   --status          Realiza un chequeo de salud y dependencias del sistema.
   --log [N]         Muestra las ultimas N lineas del log (por defecto 30).
@@ -827,17 +874,19 @@ HERRAMIENTAS ADMINISTRATIVAS:
         usage="smartmule [start|stop] [opciones]",
         epilog="""
 EJEMPLOS DE USO:
-  > smartmule start              # Iniciar SmartMule
-  > smartmule stop               # Detener SmartMule
-  > smartmule --search "Matrix"  # Buscar archivos por título o nombre
-  > smartmule --search "type:movie score>8" # Búsqueda avanzada con filtros
-  > smartmule --stats            # Ver inventario y estadísticas
-  > smartmule --status           # Chequear salud del sistema
-  > smartmule --config           # Ver configuración activa
-  > smartmule --log 50           # Ver ultimas 50 lineas del log
-  > smartmule --pid              # Ver PID activo
-  > smartmule --purge "Matrix"   # Limpiar archivos por búsqueda
-  > smartmule --reprocess "Titanic" # Forzar re-análisis del archivo de la película Titanic
+  > smartmule start                                 # Iniciar SmartMule
+  > smartmule stop                                  # Detener SmartMule
+  > smartmule --search "Matrix"                     # Búsqueda léxica por título o nombre
+  > smartmule --search "naves espaciales y suspense"  # Búsqueda semántica por conceptos
+  > smartmule --search "type:movie score>8"         # Búsqueda avanzada con filtros
+  > smartmule --stats                               # Ver inventario y estadísticas
+  > smartmule --build-index                         # Construir índice semántico para búsqueda por IA
+  > smartmule --status                              # Chequear salud del sistema
+  > smartmule --config                              # Ver configuración activa
+  > smartmule --log 50                              # Ver ultimas 50 lineas del log
+  > smartmule --pid                                 # Ver PID activo
+  > smartmule --purge "Matrix"                      # Limpiar archivos por búsqueda
+  > smartmule --reprocess "Titanic"                 # Forzar re-análisis del archivo de la película Titanic
 \n"""
     )
     
@@ -866,9 +915,20 @@ EJEMPLOS DE USO:
     parser.add_argument("--all", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-preserve", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--db", type=str, help=argparse.SUPPRESS)
     parser.add_argument("--backfill", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--build-index", action="store_true", help=argparse.SUPPRESS)
     
     args = parser.parse_args()
+
+    # 0. Override de Base de Datos (Si se proporciona)
+    if args.db:
+        # Importamos Path aquí para evitar problemas circulares o si no estuviera disponible
+        from pathlib import Path
+        global DB_PATH
+        DB_PATH = Path(args.db)
+        # También actualizamos el logger para indicar que usamos otra DB
+        logger.info(f"[*] Usando base de datos alternativa: {args.db}")
 
     # 1. Acción STOP / RESTART (Fase de parada)
     if args.action in ["stop", "restart"]:
@@ -919,12 +979,66 @@ EJEMPLOS DE USO:
         search_files(query)
         sys.exit(0)
 
-    # 2.7 Acción BACKFILL: Sincronizar metadatos antiguos
+    # 2.7 Acción BACKFILL: Sincronizar metadatos antiguos (FTS5)
     if args.backfill:
         db = HashDatabase(DB_PATH)
         db.sync_metadata_from_cache()
         db.close()
         sys.exit(0)
+
+    # 2.8 Acción BUILD-INDEX: Generar embeddings para toda la biblioteca (Búsqueda Semántica)
+    if args.build_index:
+        from smartmule.embeddings import is_available, build_metadata_text
+        from smartmule.config import EMBEDDING_MODEL
+        
+        if not is_available():
+            print("\n❌ Dependencias de búsqueda semántica no instaladas.")
+            print("   Ejecuta: pip install -r requirements-semantic.txt\n")
+            sys.exit(1)
+        
+        # Conectamos a la base de datos y obtenemos todos los archivos
+        db = HashDatabase(DB_PATH)
+        files = db.get_all_files()
+        
+        if not files:
+            print("\n[i] No hay archivos en la biblioteca para indexar.\n")
+            db.close()
+            sys.exit(0)
+            
+        print(f"\n[i] Iniciando construcción del índice semántico para {len(files)} archivos...")
+        print(f"[IA] Modelo: {EMBEDDING_MODEL}")
+        print("-" * 60)
+        
+        indexed, skipped = 0, 0
+        
+        try:
+            for i, record in enumerate(files, 1):
+                # Usamos el método upsert_embedding que acabamos de crear en database.py
+                # Este método ya se encarga de is_available(), build_metadata_text() y encode_text()
+                if db.upsert_embedding(record["id"], record):
+                    indexed += 1
+                else:
+                    skipped += 1
+                
+                # Barra de progreso simple
+                percent = (i / len(files)) * 100
+                print(f"\r   [{i}/{len(files)}] {percent:3.0f}% | OK: {indexed} | Omitidos/Error: {skipped}", end="", flush=True)
+                
+            # Logs de resumen     
+            print("\n\n✅ ¡Proceso completado!")
+            print(f"   - Archivos vectorizados: {indexed}")
+            print(f"   - Archivos omitidos:      {skipped}")
+            print(f"   - Total en biblioteca:   {len(files)}\n")
+            
+        except KeyboardInterrupt:
+            print("\n\n[!] Indexación cancelada por el usuario.")
+
+        except Exception as e:
+            print(f"\n\n❌ Error crítico durante la indexación: {e}")
+
+        finally:
+            db.close()
+            sys.exit(0)
 
     # 3. Acción PURGE: Herramienta administrativa
     if args.purge is not None:
@@ -1064,7 +1178,7 @@ EJEMPLOS DE USO:
     banner_final = (
         "\n=========================================================================\n"
         f"🚀 SmartMule está operativo (PID: {os.getpid()}).\n"
-        "   Vigilando 'Incoming' en silencio. Usa 'python main.py stop' para detenerme.\n"
+        "   Vigilando 'Incoming' en silencio. Usa 'smartmule stop' para detenerme.\n"
         "========================================================================="
     )
     logger.info(banner_final)
@@ -1081,6 +1195,7 @@ EJEMPLOS DE USO:
         watcher.stop()
         queue_manager.stop()
         remove_pid()
+
 
 # Punto de ejecución estándar de Python
 if __name__ == "__main__":

@@ -9,6 +9,9 @@ from smartmule.config import GEMINI_API_KEY, USE_LOCAL_LLM, LMSTUDIO_API_KEY, LO
 
 logger = logging.getLogger("SmartMule.parsers.llm")
 
+# Silenciamos los logs ruidosos de la librería de Google (AFC is enabled...)
+logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
 # System Prompt base, enfocado en estructuración dura sin inventarse datos
 
 SYSTEM_PROMPT = """Eres un experto en extracción de metadatos de archivos de internet. 

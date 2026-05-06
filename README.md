@@ -292,6 +292,36 @@ SmartMule es totalmente compatible con gestores de descargas Torrent. Debido a q
 
 ---
 
+## 🧠 Búsqueda Semántica (Opcional)
+
+SmartMule incorpora un motor de búsqueda híbrido que combina la precisión de palabras clave (Búsqueda léxica con FTS5) con una potente **Búsqueda Semántica Vectorial** gestionada por modelos de IA locales. 
+
+Para instalar el motor semántico (aprox. ~300MB), ejecuta:
+```bash
+pip install -r requirements-semantic.txt
+```
+
+### Características
+
+- **Multilingüe**: El modelo es capaz de entender el contexto sin importar el idioma (ej: puedes buscar "barcos que se hunden" en español y la IA encontrará "Titanic" aunque la película y sus metadatos estén en inglés).
+
+- **Algoritmo de Fusión Híbrida (Weighted RRF)**: SmartMule fusiona de forma inteligente los resultados léxicos 📝 (palabras clave exactas) y semánticos 🧠 (conceptos o temáticas) mediante un algoritmo avanzado (*Weighted Reciprocal Rank Fusion*), priorizando siempre los resultados híbridos con un código de colores (Verde > 85/100).
+
+Ejemplo de uso:
+```bash
+smartmule --search "space" 
+# Encontrará películas como Interstellar, Gravity, The Martian, etc., aunque la palabra "space" no aparezca en sus títulos.
+```
+![alt text](/images/rrf_scores.png)
+
+### Configuración
+Tras la primera instalación o si añades muchos archivos, puedes construir el índice vectorial de tu biblioteca masivamente con:
+```bash
+smartmule --build-index
+```
+
+---
+
 ## Testing
 
 SmartMule cuenta con una suite de pruebas para garantizar la estabilidad. Puedes lanzarla con el comando:

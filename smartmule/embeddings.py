@@ -2,7 +2,7 @@
 Motor de Búsqueda Semántica (Vectorial) de SmartMule.
 
 Optimizado para el sistema de caché (caching) de SmartMule, este módulo genera embeddings de alto rendimiento 
-utilizando FastEmbed (ONNX Runtime) y calcula la similitud coseno en milisegundos contra la BBDD SQLite. 
+utilizando FastEmbed (ONNX Runtime) y calcula la Similitud del Coseno en milisegundos contra la BBDD SQLite. 
 Está diseñado para Lazy Loading con el objetivo de no comprometer el rendimiento de arranque del daemon SmartMule.
 
 Su principal fortaleza reside en la capacidad de generar embeddings de alta calidad (de 384 dimensiones)
@@ -28,10 +28,12 @@ _model = None
 _model_name = None
 
 def is_available() -> bool:
+
     """
     Comprueba si las dependencias de búsqueda semántica están instaladas en el sistema.
     Esto permite que SmartMule degrade silenciosamente a búsqueda FTS5 si no hay IA disponible.
     """
+
     try:
         import fastembed  # noqa: F401
         import numpy  # noqa: F401
@@ -39,11 +41,14 @@ def is_available() -> bool:
     except ImportError:
         return False
 
+
 def _load_model(model_name: str):
+
     """
     Carga el modelo de embeddings de forma perezosa (Lazy Loading).
     Solo se ejecuta una vez por sesión O si cambia el nombre del modelo.
     """
+
     global _model, _model_name
     
     # Si el modelo no está cargado o queremos usar uno diferente
@@ -51,13 +56,21 @@ def _load_model(model_name: str):
         from fastembed import TextEmbedding
         logger.info(f"[AI] Cargando modelo de embeddings: {model_name}...")
         
-        # Inicializamos el motor de FastEmbed (usa ONNX Runtime internamente)
-        _model = TextEmbedding(model_name=model_name)
+        # Inicializamos el motor de FastEmbed (usa ONNX Runtime internamente):
+
+        # Silenciamos advertencias de pooling de FastEmbed para mantener la consola limpia
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, message=".*mean pooling.*")
+            _model = TextEmbedding(model_name=model_name)
+
         _model_name = model_name
         
         logger.info("[OK] Modelo cargado (384 dims, ONNX)")
         
     return _model
+
 
 def encode_text(text: str, model_name: str) -> bytes:
 
@@ -71,68 +84,95 @@ def encode_text(text: str, model_name: str) -> bytes:
     Returns:
         bytes: El vector serializado listo para guardarse en un campo BLOB de SQLite.
     """
+
     # Cargamos el modelo (si no lo estaba) y generamos el embedding
     model = _load_model(model_name)
     
-    # FastEmbed devuelve un generador, extraemos el primer vector
+    # FastEmbed devuelve un generador (un objeto que produce los resultados en una lista real)
+    # Extraemos el primer (y único) vector de la lista generada con '[0]'
     vector = list(model.embed([text]))[0]
-    
-    # Convertimos a float32 para ahorrar el 50% de espacio (en comparación con formato por defecto; float64)
+
+    # NumPy trabaja en 64 bits (float64) por defecto. Convertimos a 32 bits (float32) para ahorrar el 50% de espacio en disco.
+    # tobytes() convierte el array de NumPy a bytes para guardarlo en un campo BLOB de SQLite.
+    # En este punto, 'vector' es un array de 384 dimensiones.
     return vector.astype(np.float32).tobytes()
 
+
 def decode_blob(blob: bytes) -> 'np.ndarray':
+
     """
     Deserializa un BLOB binario proveniente de la BBDD a un vector de NumPy.
     """
 
-    # np.frombuffer convierte un buffer binario a un array de NumPy en memoria, sin copiar datos.
+    # np.frombuffer convierte un buffer binario a un array de NumPy en memoria (en float32), sin copiar datos.
     return np.frombuffer(blob, dtype=np.float32)
 
-def cosine_similarity_batch(query_blob: bytes, db_blobs: list[bytes]) -> list[float]:
+
+def cosine_similarity_batch(vectors, query):
+
     """
-    Calcula la Similitud del Coseno entre un query (consumido como un vector de búsqueda) y una lista de vectores de la BBDD.
-    Utiliza operaciones vectorizadas de NumPy para máxima velocidad.
+    Calcula la similitud de coseno entre una consulta y todos los vectores de la BBDD de forma masiva.
+    Utiliza operaciones vectorizadas de NumPy (@ -> Producto Matricial) para máxima velocidad.
+    
+    Args:
+        vectors: Lista de BLOBS (bytes) o Matriz NumPy (N, dim).
+        query: Vector de la consulta (NumPy array).
+        
+    Returns:
+        np.ndarray: Array con los scores de similitud.
+
+    Nota Técnica: 
+    Tiempo algorítmico: O(n), donde n=nº de dimensiones de los vectores (384).
+
+    La similitud del coseno mide el ángulo entre dos vectores. En términos de embeddings, 
+    esto significa que cuanto más similares sean dos textos, más cerca estarán sus vectores.
+    
+    Como los vectores de FastEmbed vienen ya normalizados (L2), el Producto Punto (@ en NumPy) 
+    es matemáticamente equivalente a la Similitud del Coseno, pero mucho más rápido 
+    de calcular al evitar raíces cuadradas y divisiones en cada comparación.
     """
     
-    # Deserializamos el vector de búsqueda
-    query = decode_blob(query_blob)
-    
-    # Si la lista de vectores está vacía, devolvemos una lista vacía
-    if not db_blobs:
+    # SI detecta una lista vacía de vectores, devuelve una lista vacía
+    if len(vectors) == 0:
         return []
     
-    # Reconstruimos la matriz de todos los vectores de la biblioteca
-    matrix = np.stack([decode_blob(b) for b in db_blobs])
+    # 1. Normalización de entrada
+    # Si recibimos una lista de BLOBS (bytes), los decodificamos y apilamos en una matriz NumPy
+
+    # SI detecta una lista de Bytes Y esta no está vacía Y el primer elemento es un BLOB (Bytes)
+    if isinstance(vectors, list) and len(vectors) > 0 and isinstance(vectors[0], bytes):
+        # Convierte la lista de BLOBS a una matriz NumPy (N, 384)
+        matrix = np.stack([decode_blob(b) for b in vectors])
+
+    else:
+        # Si ya recibimos una matriz NumPy (N, 384) desde database.py (CONFIGURACIÓN ACTUAL)
+        matrix = vectors # Asignamos directamente la matriz NumPy
+
+
+    # 2. Cálculo de Similitud del Coseno
     
-    # Como los vectores de FastEmbed vienen ya normalizados, el Producto Punto es equivalente a la Similitud Coseno, 
-    # pero mucho más rápido de calcular (@ -> Producto Punto en NumPy)
+    # Por si el modelo subyacente no los normaliza por defecto, 
+    # forzamos la normalización L2 de forma manual tanto de la matriz (la BBDD) como del vector de búsqueda (la query). 
+    # La similitud del coseno es el producto punto de vectores normalizados.
+    
+    # Normalizamos la consulta (query)
+    query_norm = np.linalg.norm(query)
+
+    if query_norm > 0:
+        query = query / query_norm
+        
+    # Normalizamos la matriz de la base de datos
+    matrix_norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    # Evitamos división por cero
+    matrix_norms[matrix_norms == 0] = 1e-9
+    matrix = matrix / matrix_norms
+
+    # Ahora sí, el producto matricial es estrictamente la similitud del coseno [-1, 1]
+    # '@' es el operador del Producto Matricial en NumPy. Multiplica cada fila de 'matrix' por el vector 'query'.
     scores = matrix @ query
-
-    """
-    Tiempo algorítmico: O(n), donde n=dimensión de los vectores (384)
-
-    SIMILITUD DEL COSENO:
-
-    La similitud del coseno (A · B / |A| |B|) mide el coseno del ángulo entre dos vectores. 
-        Si los vectores apuntan en la misma dirección, el ángulo es 0 y el coseno es 1. 
-        Si apuntan en direcciones opuestas, el ángulo es 180 grados y el coseno es -1. 
-        Si son ortogonales (perpendiculares), el ángulo es 90 grados y el coseno es 0.
     
-    En términos de embeddings, esto significa que cuanto más similares sean dos textos, 
-    más cerca estarán sus vectores en el espacio vectorial, y mayor será su similitud del coseno.
+    return scores
 
-    PRODUCTO PUNTO:
-    El producto punto (A · B) es más rápido de calcular que la similitud del coseno. 
-    Son equivalentes pero SOLO cuando los vectores están normalizados (su magnitud es 1).
-
-    Calcular un Producto Punto es solo hacer multiplicaciones y sumas. 
-    Calcular el coseno real obligaría al procesador a calcular raíces cuadradas (para las normas) 
-    y divisiones en cada comparación, lo cual es mucho más lento.
-
-    Como los vectores de FastEmbed vienen normalizados, en nuestro caso es preferible usar el Producto Punto.
-    """
-    
-    return scores.tolist()
 
 def get_model_info() -> Dict[str, Any]:
 

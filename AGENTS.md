@@ -120,10 +120,30 @@ If a file was incorrectly identified or you updated the parsing logic, use:
 - **Special Note on Hardlinks**: When using `hardlink` mode (default), files exist in both locations. The purge command removes them from both locations and the database.
 
 ### How to Search Files
-SmartMule uses a **FTS5** (_Full-Text Search_) engine for high-performance indexing.
+SmartMule uses a Hybrid Search Engine that blends **FTS5** (_Full-Text Search_) for high-performance lexical indexing and **FastEmbed/ONNX** for Semantic Vectorial search.
+
 - **Query**: `python main.py --search "query_term"`.
 - **Features**: Diacritic-insensitive (accent agnostic), prefix matching, regex fallback, and **Filtered Search**.
 - **Filters Syntax**: Supports `type:movie`, `score>8`, `verdict:safe`, `res:1080p`, `organized:yes`.
+- **Hybrid Fusion (Weighted RRF)**: Combines text match (1.5x weight) and semantic match (1.0x weight) using Reciprocal Rank Fusion.
+
+```mermaid
+flowchart TB
+    Q[Search Query] --> A[Engine A: FTS5]
+    Q --> B[Engine B: Semantic]
+
+    A --> AR[Text Results]
+    B --> BR[Semantic Results]
+
+    AR --> RRF["🔀 Weighted RRF Fusion (k=60)"]
+    BR --> RRF
+
+    RRF --> R["📋 Combined Results"]
+
+    style RRF fill:#f59e0b,color:#000
+    style B fill:#8b5cf6,color:#fff
+    style A fill:#3b82f6,color:#fff
+```
 
 ### How to Add a New Category
 1. Add classification logic to `smartmule/metadata_engine.py`.

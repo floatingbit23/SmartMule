@@ -1,23 +1,28 @@
 """
-Motor de Persistencia y Motor de Metadatos de SmartMule.
+Motor de Persistencia y Búsqueda Híbrida de SmartMule.
 
-Gestiono el almacenamiento centralizado en SQLite (v3.46+) para garantizar la integridad y el 
-enriquecimiento de la biblioteca multimedia.
+Gestiona el almacenamiento centralizado en SQLite (v3.46+) bajo modo WAL (Write-Ahead Logging) para 
+garantizar la integridad, concurrencia y enriquecimiento de la biblioteca multimedia.
 
 Este módulo es el "cerebro" que permite:
-1. Optimización P2P: Evitar el recalculo de hashes ED2K/SHA256 y prevenir duplicidad de archivos.
 
-2. Enriquecimiento Semántico: Almacenar metadatos avanzados (Autores, Títulos, Resoluciones) obtenidos mediante el análisis híbrido (Regex + LLM + APIs externas).
+1. Optimización P2P: Evitar el recalculo de hashes ED2K/SHA256 y prevenir duplicidad de archivos/metadatos.
 
-3. Triage de Seguridad: Persistir veredictos de seguridad y enlaces de informes de VirusTotal.
+2. Enriquecimiento Semántico: Almacenar metadatos avanzados (Autores, Títulos, Resoluciones...) 
+    obtenidos mediante análisis híbrido (Regex + LLM + APIs externas).
 
-4. Motor de Búsqueda: Servir como base para el sistema de búsqueda global avanzada (FTS5).
-    Cascada de búsqueda: FTS5 (rápido) → REGEXP (rápido) → Distancia de Levenshtein (lento, pero resuelve typos)
+3. Almacenamiento Vectorial: Persistencia de embeddings (vectores de 384 dimensiones) para habilitar 
+   la búsqueda por conceptos mediante un ligero modelo de IA local.
 
-5. Trazabilidad: Mantener el estado de organización (is_organized) y rutas físicas finales.
+4. Búsqueda Híbrida Inteligente: Motor avanzado que combina FTS5 (permite búsqueda léxica rápida) con 
+   Similitud del Coseno (permite búsqueda semántica con IA) mediante un algoritmo Weighted RRF (Reciprocal Rank Fusion).
 
-La base de datos es un archivo autónomo ('smartmule.db') ubicado en la carpeta Library. 
-No requiere configuración, es resiliente a fallos y escala eficientemente para miles de registros.
+5. Triage de Seguridad: Persistencia de veredictos de seguridad y reportes de la API de VirusTotal.
+
+6. Trazabilidad e Integridad: Mantener el estado de organización, rutas físicas y validación de versión del modelo de embeddings activo.
+
+La base de datos ('smartmule.db') es resiliente, escala eficientemente para miles de registros y 
+es el núcleo de toda la inteligencia de descubrimiento del proyecto.
 """
 
 import re # Para el soporte de expresiones regulares en la búsqueda
@@ -25,7 +30,7 @@ import sqlite3
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional # Para indicar que una función puede devolver None
+from typing import Optional, Union # Para indicar que una función puede devolver None o varios tipos
  
 logger = logging.getLogger("SmartMule.database")
 
@@ -88,6 +93,12 @@ class HashDatabase:
 
 
     # --- MOTOR DE BÚSQUEDA INTELIGENTE FTS5 (Full-Text Search 5) ---
+
+    """
+    Busca coincidencias basadas en palabras clave.
+    Da una puntuación basada en frecuencia de palabras (BM25 Algorithm)
+    Elimina diacríticos (para que 'tecnologia' coincida con 'tecnología').
+    """
 
     # Tabla Virtual FTS5 (Búsqueda Inteligente)
 
@@ -174,7 +185,7 @@ class HashDatabase:
 
 
     # Constructor
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Union[str, Path]):
 
         """
         Abro (o creo) la base de datos (BBDD) SQLite y me aseguro de que la tabla existe.
@@ -184,7 +195,9 @@ class HashDatabase:
         """
 
         # Me aseguro de que el directorio padre existe antes de crear el archivo .db.
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Si es ":memory:", no hay directorio padre que crear.
+        if str(db_path) != ":memory:":
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         # Abro la conexión con la BBDD SQLite.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -450,20 +463,34 @@ class HashDatabase:
     
     def _sanitize_fts_query(self, raw_query: str) -> str:
         """
-        Convierte un término de búsqueda libre en una consulta FTS5 segura.
-        Envuelve cada token entre comillas dobles para evitar que FTS5
-        interprete operadores no intencionados (guiones, puntos, paréntesis).
+        Convierte un término de búsqueda libre en una consulta FTS5 segura y optimizada.
+        Aplica un filtro de 'Stop Words' para eliminar ruido léxico (de, que, the, and...).
         """
-        # Dividimos por espacios y envolvemos cada fragmento entre comillas
-        tokens = raw_query.split()
+        # Lista básica de Stop Words (Español e Inglés) para limpiar la query léxica
+        STOP_WORDS = {
+            'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'sí', 'porque', 'esta', 'entre', 'cuando', 'muy', 'sin', 'sobre', 'también', 'me', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'cursos', 'si', 'the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'been', 'would', 'should'
+        }
+
+        # Dividimos por espacios
+        tokens = raw_query.lower().split()
         
-        # Cada token se escapa individualmente: "The" "Matrix" "1999"
-        safe_tokens = [f'"{t}"' for t in tokens if t.strip()]
+        # Filtramos Stop Words y tokens muy cortos
+        # Solo aplicamos el filtro si la consulta tiene más de 2 palabras (si es una frase)
+        meaningful_tokens = []
+        for t in tokens:
+            clean_t = t.strip('.,:;()[]"\'')
+            if clean_t not in STOP_WORDS and len(clean_t) >= 2:
+                meaningful_tokens.append(f'"{clean_t}"*')
+
+        # Si el filtro nos deja vacíos (ej: buscabas "El o La"), usamos los originales
+        if not meaningful_tokens:
+            meaningful_tokens = [f'"{t}"*' for t in tokens if len(t.strip()) >= 2]
         
-        if not safe_tokens:
+        if not meaningful_tokens:
             return '""'
         
-        return " ".join(safe_tokens)
+        # Unimos con OR para máxima flexibilidad (Discovery Search)
+        return " OR ".join(meaningful_tokens)
 
 
     def _parse_filtered_query(self, raw_query: str) -> tuple[str, list, list]:
@@ -560,8 +587,9 @@ class HashDatabase:
 
 
     def search_by_name(self, query: str) -> list[dict]:
+
         """
-        Motor de búsqueda híbrido avanzado con soporte para filtros agrupados.
+        Motor de búsqueda híbrido avanzado (FTS5 + Filtros) con soporte para filtros agrupados.
         """
 
         # Si no hay query, devolvemos todo (--purge sin argumentos)
@@ -576,7 +604,9 @@ class HashDatabase:
         where_clauses = []
         all_params = []
 
-        # Si hay texto, usamos FTS5 (MATCH contra la tabla virtual)
+        # Si hay texto, usamos FTS5 con pesos BM25 por columna (con author boost)
+        # Pesos de las columnas: file_name(1.5), official_title(2.0), author(3.0), languages(0.5), overview(1.0), overview_en(1.0), genres(0.8)
+        # El peso de 'author' es 3x para dar prioridad a búsquedas por nombre de creador.
         if text_query:
             sql_base += " JOIN files_fts fts ON f.id = fts.rowid"
             where_clauses.append("files_fts MATCH ?")
@@ -592,13 +622,19 @@ class HashDatabase:
             if where_clauses:
                 sql += " WHERE " + " AND ".join(where_clauses)
             
-            sql += " ORDER BY f.processed_at DESC"
+            # Ordenamos por BM25 con pesos (valores negativos: más negativo = más relevante)
+            # Pesos: file_name, official_title, author, languages, overview, overview_en, genres
+            if text_query:
+                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8) ASC"
+            else:
+                sql += " ORDER BY f.processed_at DESC"
             
             cursor = self._conn.execute(sql, tuple(all_params))
             results = [dict(row) for row in cursor.fetchall()]
             
             # Si no hay resultados FTS5 y hay texto, intentamos fallbacks
             if not results and text_query:
+
                 # 1. Fallback a Regex (si no hay filtros puros)
                 if not filter_conditions:
                     results = self._search_by_regexp(text_query)
@@ -859,6 +895,7 @@ class HashDatabase:
         # Duración (técnica)
         duration = metadata.get("technical", {}).get("duration_sec", 0)
 
+        # Query para actualizar (UPDATE) el registro
         self._conn.execute(
             """
             UPDATE files
@@ -871,8 +908,27 @@ class HashDatabase:
              api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), fingerprint, file_size)
         )
 
+        # Confirma los cambios
         self._conn.commit()
+        
         logger.debug(f"[*]  Metadatos actualizados en BBDD para huella: {fingerprint[:8]}...")
+
+        # Automatización del Embedding Semántico
+        try:
+            # Recuperamos el ID y la fila completa para generar el embedding
+            cursor = self._conn.execute("SELECT * FROM files WHERE fingerprint=? AND file_size=?", (fingerprint, file_size))
+            row = cursor.fetchone()
+
+            if row:
+                file_id = row['id']
+
+                # Llamamos a la lógica de indexación semántica
+                self.upsert_embedding(file_id, dict(row))
+
+        except Exception as e:
+            logger.error(f"[ERR]  No se pudo disparar la vectorización automática para {fingerprint[:8]}: {e}")
+
+        
 
 
     # Función para obtener todos los registros (para el flag --list)
@@ -890,6 +946,15 @@ class HashDatabase:
             
         cursor = self._conn.execute(sql)
         return [dict(row) for row in cursor.fetchall()]
+
+
+    def get_file_by_id(self, file_id: int) -> Optional[dict]:
+        """
+        Recupera los metadatos completos de un archivo por su ID único.
+        """
+        cursor = self._conn.execute("SELECT * FROM files WHERE id = ?", (file_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 
     # Función para obtener estadísticas de la base de datos
@@ -914,7 +979,7 @@ class HashDatabase:
             row = cursor.fetchone()
             stats["total"] = row[0]
             stats["total_size"] = row[1] or 0
-
+            
             # 2. Obtener conteo y tamaño por categoría
             cursor = self._conn.execute("SELECT media_type, COUNT(*), SUM(file_size) FROM files GROUP BY media_type ORDER BY COUNT(*) DESC")
             for row in cursor.fetchall():
@@ -971,11 +1036,257 @@ class HashDatabase:
             logger.error(f"[ERR]  Error guardando en metadata_cache para {ed2k_hash}: {e}")
 
 
+    # --- GESTIÓN DE MODELOS SEMÁNTICOS ---
+
+    def check_embedding_model_mismatch(self, current_model: str) -> bool:
+
+        """
+        Verifica si existen embeddings en la base de datos generados con un modelo
+        distinto al configurado actualmente.
+        """
+
+        try:
+
+            # Buscamos cualquier registro que tenga un modelo diferente al actual
+            sql = "SELECT COUNT(*) FROM media_embeddings WHERE model_name != ?"
+            cursor = self._conn.execute(sql, (current_model,))
+            count = cursor.fetchone()[0]
+
+            return count > 0 # True si hay mismatch (count > 0), False si no lo hay (count == 0) 
+
+        except Exception:
+            # Si la tabla no existe o hay error, asumimos que no hay mismatch
+            return False
+
+    # --- BÚSQUEDA SEMÁNTICA ---
+
+    def search_semantic(self, query: str, limit: int = 10) -> list[dict]:
+
+        """
+        Realiza una búsqueda semántica (vectorial) en la biblioteca. 
+        
+        Proceso:
+        1. Codifica la consulta en un vector.
+        2. Recupera todos los embeddings de la BBDD (Escalable hasta ~50k registros en RAM).
+        3. Calcula la similitud de coseno en batch o "lotes" (Matrix Multiplication @).
+        4. Devuelve los N resultados más parecidos con su puntuación semántica.
+        """
+
+        try:
+
+            logger.debug("[SEARCH] Iniciando búsqueda semántica (Vectorial) para: '%s'", query)
+
+            # Importaciones internas (Lazy Loading)
+            from smartmule import embeddings
+            from smartmule.config import EMBEDDING_MODEL
+            import numpy as np
+
+            # 1. Verificamos disponibilidad del motor
+            if not embeddings.is_available():
+                logger.warning("[SEARCH] Motor semántico no disponible. Abortando búsqueda vectorial.")
+                return []
+
+            # 2. Codificamos la consulta (Generamos el vector de la pregunta)
+            query_blob = embeddings.encode_text(query, model_name=EMBEDDING_MODEL)
+
+            if not query_blob:
+                return []
+            
+            # Convertimos el BLOB a array de NumPy (float32)
+            query_vec = np.frombuffer(query_blob, dtype=np.float32)
+
+            # 3. Recuperamos el catálogo de vectores (BLOBs)
+            # Nota: Cargamos solo ID y Vector para minimizar el uso de memoria durante la comparación.
+            sql = "SELECT file_id, embedding FROM media_embeddings WHERE model_name = ?"
+            cursor = self._conn.execute(sql, (EMBEDDING_MODEL,))
+            rows = cursor.fetchall()
+
+            if not rows:
+                return []
+
+            # Preparamos los datos para el motor NumPy
+            file_ids = []
+            vectors = []
+            
+            # Recorremos la lista de resultados y convertimos cada BLOB a vector
+            for fid, blob in rows:
+                file_ids.append(fid)
+                vectors.append(np.frombuffer(blob, dtype=np.float32))
+
+            # 4. Cálculo de Similitud Masiva
+            # Convertimos la lista de vectores en una matriz (N, 384)
+            matrix = np.stack(vectors)
+            
+            # Calculamos similitudes (Producto Punto '@', ya que los vectores vienen normalizados)
+            scores = embeddings.cosine_similarity_batch(matrix, query_vec)
+
+            # 5. Selección y Enriquecimiento
+            # Obtenemos los índices de los mejores resultados (ordenados por similitud de mayor a menor)
+            top_indices = np.argsort(scores)[::-1][:limit]
+            
+            results = []
+            seen_ids = set()
+
+            # Procesamos los resultados ordenados
+            for idx in top_indices:
+                fid = int(file_ids[idx])
+                score = float(scores[idx])
+                
+                # FILTRO DE RUIDO: Si la similitud es muy baja, la ignoramos para evitar "basura"
+                # Bajamos de 0.24 a 0.20 para mejorar el recall en búsquedas abstractas
+                if score < 0.20 or fid in seen_ids:
+                    continue
+                
+                record = self.get_file_by_id(fid)
+                if record:
+                    record['semantic_score'] = score
+                    results.append(record)
+                    seen_ids.add(fid)
+
+            return results
+
+        except Exception as e:
+            logger.error(f"[ERR]  Fallo crítico en búsqueda semántica: {e}")
+            return []
+
+
+    def search_hybrid(self, query: str, limit: int = 10, k: int = 60) -> list[dict]:
+
+        """
+        Búsqueda Híbrida Avanzada (Hybrid Search).
+
+        Aplica el algoritmo Weighted Reciprocal Rank Fusion (Weighted RRF) para combinar:
+        
+        - FTS5 (Búsqueda Léxica/Keywords): Excelente para nombres exactos y técnicos.
+            Da una puntuación basada en frecuencia de palabras (BM25 Algorithm)
+
+        - Semantic (Búsqueda Vectorial/Semántica): Excelente para conceptos, sinónimos y lenguaje natural.
+            Da una puntuación de 0 a 1 (Similitud del Coseno)
+
+        Fórmula Weighted RRF: score = sum( w_i * similarity * (1 / (k + rank_i)) ), con k=60 (Factor de escalado estándar de RRF)
+
+        El uso de Weighted RRF permite dar prioridad a la búsqueda léxica (1.5x) sobre la semántica (1.0x), 
+        lo cual es crítico en sistemas de gestión de archivos donde los nombres técnicos exactos suelen ser 
+        más relevantes que los conceptos generales.
+        """
+
+        # 1. Obtenemos resultados de ambos mundos (Léxico y Semántico)
+        # Pedimos un margen mayor a la búsqueda semántica para una fusión más rica
+        fts_results = self.search_by_name(query)
+        
+        semantic_results = []
+        # Solo intentamos búsqueda semántica si hay texto en la consulta (límite de 50 candidatos máximo)
+        if query.strip():
+            semantic_results = self.search_semantic(query, limit=max(50, limit * 2))
+
+        # 2. Fusión de Rangos (Weighted RRF)
+        rrf_map = {} # {file_id: rrf_score}
+        record_map = {} # {file_id: record}
+
+        # Procesamos resultados de FTS5 (si existen)
+        for rank, record in enumerate(fts_results, 1):
+            
+            # ID único del archivo
+            fid = record['id']
+            
+            # APLICAMOS PESO 1.5x AL TEXTO (Prioridad literal)
+            weight_text = 1.5
+            rrf_map[fid] = rrf_map.get(fid, 0) + (weight_text * (1.0 / (k + rank)))
+
+            # Guardamos el registro
+            record_map[fid] = record
+
+            # Marcamos el origen
+            record_map[fid]['search_origin'] = 'fts'
+
+        # Procesamos resultados Semánticos
+        for rank, record in enumerate(semantic_results, 1):
+            
+            # ID único del archivo
+            fid = record['id']
+            
+            # APLICAMOS PESO 1.0x E INYECCIÓN DE SIMILITUD
+            similarity = record.get('semantic_score', 1.0)
+            weight_ai = 1.0
+            
+            # Sumamos el score (o lo inicializamos)
+            rrf_map[fid] = rrf_map.get(fid, 0) + (weight_ai * similarity * (1.0 / (k + rank)))
+            
+            # Actualizamos metadatos y origen
+            if fid not in record_map:
+                record_map[fid] = record
+                record_map[fid]['search_origin'] = 'semantic'
+            else:
+                # Si ya estaba (viene de FTS), es HÍBRIDO
+                record_map[fid]['search_origin'] = 'hybrid'
+            
+            record_map[fid]['semantic_score'] = similarity
+
+        # 3. Ordenación final por relevancia combinada (puntuación Weighted RRF de mayor a menor)
+        sorted_results = sorted(rrf_map.items(), key=lambda x: x[1], reverse=True)
+
+        # 4. Construcción del TOP N (los mejores 10 resultados, ya ordenados por relevancia combinada)
+        final_list = []
+
+        # Calculamos el score máximo REAL para normalización dinámica en la capa de presentación.
+        # Esto permite que el rango 0-100 se expanda dinámicamente según la distribución real de scores,
+        # en lugar de usar el máximo teórico (que siempre da scores comprimidos en búsquedas conceptuales).
+        max_observed_score = sorted_results[0][1] if sorted_results else 1.0
+
+        # Recorremos los resultados ordenados
+        for fid, rrf_score in sorted_results[:limit]:
+
+            # Obtenemos el registro completo (el diccionario con todos los metadatos del archivo)
+            record = record_map[fid]
+
+            # Añadimos el score del Weighted RRF y el máximo observado para normalización dinámica
+            record['relevance_score'] = rrf_score
+            record['max_observed_score'] = max_observed_score
+
+            # Añadimos el registro a la lista final
+            final_list.append(record)
+
+        # Devolvemos el TOP N de resultados
+        return final_list
+
+
+    def upsert_embedding(self, file_id: int, record: dict) -> bool:
+
+        """
+        Punto de entrada para la indexación semántica.
+        Encapsula la construcción del texto, la vectorización y el guardado en la "tabla satélite" (media_embeddings).
+        """
+        try:
+
+            # Importaciones internas (aplicando Lazy Loading para evitar dependencias cíclicas)
+            from smartmule import embeddings
+            from smartmule.config import EMBEDDING_MODEL
+            
+            # 1. Verificamos si el motor semántico está disponible
+            if not embeddings.is_available():
+                return False
+                
+            # 2. Construimos el párrafo semántico "rico (Máquina de Contexto)
+            metadata_text = embeddings.build_metadata_text(record)
+            
+            # 3. Codificamos el texto a vector (BLOB float32)
+            embedding_blob = embeddings.encode_text(metadata_text, model_name=EMBEDDING_MODEL)
+            
+            # 4. Guardamos en la tabla satélite
+            self._save_embedding(file_id, embedding_blob, metadata_text, EMBEDDING_MODEL)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[ERR]  Fallo al procesar embedding para archivo ID {file_id}: {e}")
+            return False
+
+
     def _save_embedding(self, file_id: int, embedding_blob: bytes, metadata_text: str, model_name: str) -> None:
 
         """
         Método privado que guarda un vector de embedding asociado a un archivo. 
-        Almacena los vectores serializados de forma eficiente (float32 binario).
+        Almacena los vectores serializados de forma eficiente (BLOB float32).
         Cada archivo ocupa solo ~1.5KB (384 dimensiones del vector * 4 bytes).
         """
 

@@ -303,6 +303,36 @@ SmartMule is fully compatible with Torrent download managers. Because Torrent ne
 
 ---
 
+## 🧠 Semantic Search (Optional)
+
+SmartMule features a hybrid search engine combining keyword precision (FTS5) with powerful **Vectorial Semantic Search** powered by local AI models.
+
+To install the semantic engine (approx. ~300MB), run:
+```bash
+pip install -r requirements-semantic.txt
+```
+
+### Features
+
+- **Multilingual**: The model understands context regardless of language (e.g., search "sinking ships" and the AI will find "Titanic" even if metadata is in Spanish).
+
+- **Hybrid Fusion Algorithm (Weighted RRF)**: SmartMule intelligently blends lexical results (exact keywords) and semantic results (concepts/themes) using an advanced algorithm (*Weighted Reciprocal Rank Fusion*), always prioritizing hybrid matches visually via color codes (Green > 85/100).
+
+Usage Example:
+```bash
+smartmule --search "space" 
+# Finds movies like Interstellar, Gravity, The Martian, etc., even if the word "space" does not appear in their titles.
+```
+![alt text](/images/rrf_scores.png)
+
+### Configuration
+After the first installation or adding many files, you can build the vector index for your library in bulk:
+```bash
+smartmule --build-index
+```
+
+---
+
 ## Testing
 
 Full test suite to ensure stability. Execute it with:
