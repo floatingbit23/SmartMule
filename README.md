@@ -58,10 +58,13 @@ SmartMule organiza tus archivos en las siguientes categorías automáticas dentr
 
 *   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 
-*   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros. Localiza cualquier archivo por título, tipo, puntuación o resolución al instante. 
+*   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros avanzados. Localiza cualquier archivo por título, tipo, puntuación, resolución, género o fecha al instante. 
     ```bash
     smartmule --search "Matrix"               # Búsqueda por nombre o título
-    smartmule --search "type:movie score>8"  # Búsqueda con filtros
+    smartmule --search "type:movie score>8"  # Búsqueda con filtros de tipo y nota
+    smartmule --search "res:1080p genre:scifi" # Filtros por resolución y género
+    smartmule --search "verdict:safe"          # Solo archivos verificados como seguros
+    smartmule --search "added:today"           # Archivos añadidos en las últimas 24h
     ```
 
 *   **Triaje Automático**: 
@@ -147,7 +150,8 @@ Una vez configurado el alias, puedes usar estos comandos desde cualquier carpeta
 | `smartmule start` | Arranca el motor de vigilancia (Daemon). |
 | `smartmule stop` | Detiene el servicio de forma segura. |
 | `smartmule restart` | Reinicia el motor (Stop + Start). |
-| `smartmule --search "..."` | Búsqueda inteligente con filtros. |
+| `smartmule --search "..."` | Búsqueda inteligente (Híbrida) con filtros. |
+| `smartmule --build-index` | Reconstruir el índice semántico (IA). |
 | `smartmule --stats` | Inventario y estadísticas de almacenamiento. |
 | `smartmule --status` | Chequeo de salud y dependencias. |
 | `smartmule --config` | Ver rutas y APIs activas. |
@@ -305,7 +309,9 @@ pip install -r requirements-semantic.txt
 
 - **Multilingüe**: El modelo es capaz de entender el contexto sin importar el idioma (ej: puedes buscar "barcos que se hunden" en español y la IA encontrará "Titanic" aunque la película y sus metadatos estén en inglés).
 
-- **Algoritmo de Fusión Híbrida (Weighted RRF)**: SmartMule fusiona de forma inteligente los resultados léxicos 📝 (palabras clave exactas) y semánticos 🧠 (conceptos o temáticas) mediante un algoritmo avanzado (*Weighted Reciprocal Rank Fusion*), priorizando siempre los resultados híbridos con un código de colores (Verde > 85/100).
+- **Algoritmo de Fusión Híbrida (_Weighted RRF_)**: SmartMule fusiona de forma inteligente los resultados léxicos 📝 (palabras clave exactas) y semánticos 🧠 (mediante _Bi-Encoder_) mediante un algoritmo avanzado (_Weighted Reciprocal Rank Fusion_).
+
+- **Re-Ranking de Alta Precisión (_Cross-Encoder_)**: Los mejores 10 resultados pasan por una segunda capa de IA (_Cross-Encoder_) que analiza la relación real entre tu búsqueda y el contenido, marcando los aciertos más probables con la etiqueta **🧠✨ AI+**.
 
 Ejemplo de uso:
 ```bash

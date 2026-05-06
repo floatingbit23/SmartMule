@@ -65,10 +65,13 @@ SmartMule organizes your files into the following automatic categories within yo
     ![alt text](/images/suspicious.png)
     ![alt text](/images/antimalware.png)
 
-*   **Intelligent Search (FTS5)**: Integrated global search engine with support for filters. Locate any file by title, type, score, or resolution instantly.
+*   **Intelligent Search (FTS5)**: Integrated global search engine with support for advanced filters. Locate any file by title, type, score, resolution, genre, or date instantly.
     ```bash
     smartmule --search "Matrix"               # Simple search
-    smartmule --search "type:movie score>8"  # Filtered search
+    smartmule --search "type:movie score>8"  # Filtered search (type and rating)
+    smartmule --search "res:1080p genre:scifi" # Filter by resolution and genre
+    smartmule --search "verdict:safe"          # Show only verified safe files
+    smartmule --search "added:today"           # Files added in the last 24h
     ```
 
 *   **Privacy**: Compatible with local models (LM Studio) to process names without uploading them to the cloud.
@@ -146,7 +149,8 @@ Once the alias is configured, you can use these commands from any folder:
 | `smartmule start` | Starts the surveillance engine (Daemon). |
 | `smartmule stop` | Safely stops the service. |
 | `smartmule restart` | Restarts the engine (Stop + Start). |
-| `smartmule --search "..."` | Intelligent search with filters. |
+| `smartmule --search "..."` | Intelligent (Hybrid) search with filters. |
+| `smartmule --build-index` | Rebuild the semantic index (AI). |
 | `smartmule --stats` | Library inventory and storage statistics. |
 | `smartmule --status` | Health check and dependencies. |
 | `smartmule --config` | View active paths and APIs. |
@@ -316,12 +320,14 @@ pip install -r requirements-semantic.txt
 
 - **Multilingual**: The model understands context regardless of language (e.g., search "sinking ships" and the AI will find "Titanic" even if metadata is in Spanish).
 
-- **Hybrid Fusion Algorithm (Weighted RRF)**: SmartMule intelligently blends lexical results (exact keywords) and semantic results (concepts/themes) using an advanced algorithm (*Weighted Reciprocal Rank Fusion*), always prioritizing hybrid matches visually via color codes (Green > 85/100).
+- **Hybrid Fusion Algorithm (_Weighted RRF_)**: SmartMule intelligently blends lexical results 📝 (exact keywords) and semantic results 🧠 (using _Bi-Encoder_) using an advanced algorithm (*Weighted Reciprocal Rank Fusion*).
+
+- **High-Precision Re-Ranking (_Cross-Encoder_)**: Top results pass through a second AI layer (_Cross-Encoder_) that evaluates the actual relationship between your query and the content, marking the best matches with the **🧠✨ AI+** badge.
 
 Usage Example:
 ```bash
 smartmule --search "space" 
-# Finds movies like Interstellar, Gravity, The Martian, etc., even if the word "space" does not appear in their titles.
+# Finds movies like Interstellar, Gravity, The Martian... even if the word "space" does not appear in their titles.
 ```
 ![alt text](/images/rrf_scores.png)
 
