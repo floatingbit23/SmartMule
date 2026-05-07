@@ -4,7 +4,7 @@
 
 ### El Bibliotecario Inteligente para el Ecosistema P2P
 
-**SmartMule** es un servicio automatizado de organización y seguridad diseñado para transformar el caos de las descargas P2P (eMule, aMule, clientes Torrent, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K) e Inteligencia Artificial (_Small Language Models_) para clasificar, limpiar y proteger tu equipo de amenazas camufladas.
+**SmartMule** es un servicio automatizado de organización, seguridad y búsqueda inteligente diseñado para transformar el caos de las descargas P2P (eMule, aMule, clientes Torrent, etc.) en una biblioteca perfectamente estructurada. Utiliza vigilancia del sistema de archivos, hashing criptográfico (ED2K), Inteligencia Artificial (_Small Language Models_) y un motor de búsqueda híbrido (FTS5 + Semántico) para clasificar, limpiar, localizar y proteger tu equipo de amenazas camufladas.
 
 ![SmartMule](/images/SmartMule_Logo_Oficial.png)
 
@@ -309,7 +309,7 @@ pip install -r requirements-semantic.txt
 
 - **Multilingüe**: El modelo es capaz de entender el contexto sin importar el idioma (ej: puedes buscar "barcos que se hunden" en español y la IA encontrará "Titanic" aunque la película y sus metadatos estén en inglés).
 
-- **Algoritmo de Fusión Híbrida (_Weighted RRF_)**: SmartMule fusiona de forma inteligente los resultados léxicos 📝 (palabras clave exactas) y semánticos 🧠 (mediante _Bi-Encoder_) mediante un algoritmo avanzado (_Weighted Reciprocal Rank Fusion_).
+- **Algoritmo de Fusión Híbrida (_Weighted RRF_)**: SmartMule fusiona de forma inteligente los resultados léxicos 📝 (palabras clave exactas mediante **BM25** con $k_1=1.2$ y $b=0.75$) y semánticos 🧠 (mediante _Bi-Encoder_) mediante un algoritmo avanzado (_Weighted Reciprocal Rank Fusion_).
 
 - **Re-Ranking de Alta Precisión (_Cross-Encoder_)**: Los mejores 10 resultados pasan por una segunda capa de IA (_Cross-Encoder_) que analiza la relación real entre tu búsqueda y el contenido, marcando los aciertos más probables con la etiqueta **🧠✨ AI+**.
 

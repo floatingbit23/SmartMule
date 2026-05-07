@@ -4,7 +4,7 @@
 
 ### The Intelligent Librarian for the P2P Ecosystem
 
-**SmartMule** is an automated organization and security service designed to transform the chaos of P2P downloads (eMule, aMule, Torrent clients, etc.) into a perfectly structured library. It uses file system monitoring, cryptographic hashing (ED2K), and Artificial Intelligence (_Small Language Models_) to classify, clean, and protect your computer from disguised threats.
+**SmartMule** is an automated organization, security, and intelligent search service designed to transform the chaos of P2P downloads (eMule, aMule, Torrent clients, etc.) into a perfectly structured library. It uses file system monitoring, cryptographic hashing (ED2K), Artificial Intelligence (_Small Language Models_), and a hybrid search engine (FTS5 + Semantic) to classify, clean, locate, and protect your computer from disguised threats.
 
 ![SmartMule](/images/SmartMule_Logo_Oficial.png)
 
@@ -320,7 +320,7 @@ pip install -r requirements-semantic.txt
 
 - **Multilingual**: The model understands context regardless of language (e.g., search "sinking ships" and the AI will find "Titanic" even if metadata is in Spanish).
 
-- **Hybrid Fusion Algorithm (_Weighted RRF_)**: SmartMule intelligently blends lexical results 📝 (exact keywords) and semantic results 🧠 (using _Bi-Encoder_) using an advanced algorithm (*Weighted Reciprocal Rank Fusion*).
+- **Hybrid Fusion Algorithm (_Weighted RRF_)**: SmartMule intelligently blends lexical results 📝 (exact keywords via **BM25** with $k_1=1.2$ and $b=0.75$) and semantic results 🧠 (using _Bi-Encoder_) using an advanced algorithm (*Weighted Reciprocal Rank Fusion*).
 
 - **High-Precision Re-Ranking (_Cross-Encoder_)**: Top results pass through a second AI layer (_Cross-Encoder_) that evaluates the actual relationship between your query and the content, marking the best matches with the **🧠✨ AI+** badge.
 
