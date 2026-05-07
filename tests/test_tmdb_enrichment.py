@@ -82,12 +82,13 @@ def test_tmdb_bilingual_enrichment_flow(temp_db):
         )
 
         # 3. Verificación en la Base de Datos
-        cursor = temp_db._conn.execute("SELECT overview, overview_en, genres FROM files WHERE fingerprint='matrix_fingerprint'")
+        cursor = temp_db._conn.execute("SELECT overview, overview_en, genres, genres_en FROM files WHERE fingerprint='matrix_fingerprint'")
         row = cursor.fetchone()
         
         db_overview_es = row[0]
         db_overview_en = row[1]
-        db_genres = row[2]
+        db_genres_es = row[2]
+        db_genres_en = row[3]
 
         # Comprobamos sinopsis ES
         assert "película de acción" in db_overview_es
@@ -95,9 +96,10 @@ def test_tmdb_bilingual_enrichment_flow(temp_db):
         # Comprobamos sinopsis EN (Capturada de los detalles)
         assert "computer hacker" in db_overview_en
         
-        # Comprobamos géneros bilingües
-        # ID 28: Acción | Action, ID 878: Ciencia ficción | Science Fiction
-        assert "Acción | Action" in db_genres
-        assert "Ciencia ficción | Science Fiction" in db_genres
+        # Comprobamos géneros bilingües (ahora en columnas separadas)
+        assert "Acción" in db_genres_es
+        assert "Action" in db_genres_en
+        assert "Ciencia ficción" in db_genres_es
+        assert "Science Fiction" in db_genres_en
 
         print("\n[OK] Test de enriquecimiento bilingüe TMDB completado con éxito.")

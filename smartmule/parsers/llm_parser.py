@@ -79,11 +79,13 @@ def _call_gemini(filename: str, extra_context: str = "") -> dict:
             client = genai.Client(api_key=GEMINI_API_KEY)
             
             # Inferencia con salida JSON forzada, incluyendo el contexto técnico si existe
+            logger.info(f"[AI] Enviando petición de limpieza a Gemini para: {filename}...")
             response = client.models.generate_content(
                 model='gemini-flash-latest', 
                 contents=f"{SYSTEM_PROMPT}\n\nAnaliza este archivo: '{filename}'{extra_context}", 
                 config={'response_mime_type': 'application/json'}
             )
+            logger.info("[AI] Respuesta recibida de Gemini.")
             
             # Convertimos el string JSON a diccionario
             clean_text = _clean_json_text(response.text)
@@ -139,7 +141,7 @@ def _clean_json_text(raw_text: str) -> str:
     return raw_text.strip()
 
 
-def analyze_media_content(title: str, author: str = None, media_type: str = "book") -> dict:
+def analyze_media_content(title: str, author: str = None, media_type: str = "book", context_text: str = None) -> dict:
     
     """
     Usa la IA como respaldo para generar una sinopsis y metadatos enriquecidos 
@@ -150,37 +152,59 @@ def analyze_media_content(title: str, author: str = None, media_type: str = "boo
     Título: {title}
     {f'Autor: {author}' if author else ''}
     Tipo: {media_type}
+    {f'Texto de referencia (para traducir o completar): {context_text}' if context_text else ''}
 
     Devuelve un JSON con:
-    - "overview": Una sinopsis o resumen de la trama (en español, max 300 palabras).
+    - "overview": Una sinopsis o resumen de la trama en español (máximo de 300 palabras).
+    - "overview_en": The same synopsis or plot summary in English (max of 300 words).
+    - "genres": Géneros de la obra en español (ej: "Ciencia Ficción", "Terror").
+    - "genres_en": Genres in English (e.g., "Sci-Fi", "Horror").
     - "cast": Lista de personajes principales (si es ficción) o temas clave (si es ensayo/técnico).
     - "collection": Nombre de la saga o colección a la que pertenece (si aplica).
-    - "keywords": 5-8 etiquetas descriptivas.
+    - "keywords": 5-8 etiquetas descriptivas en español.
+    - "keywords_en": 5-8 descriptive keywords in English.
 
     JSON puro, sin markdown."""
 
-    try:
-        if USE_LOCAL_LLM:
-            client = openai.OpenAI(base_url=LOCAL_LLM_URL, api_key=LMSTUDIO_API_KEY)
-            response = client.chat.completions.create(
-                model="local-model",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw_text = response.choices[0].message.content
-        else:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model='gemini-flash-latest', 
-                contents=prompt,
-                config={'response_mime_type': 'application/json'}
-            )
-            raw_text = response.text
+    max_retries = 3
+    retry_delay = 5
 
-        clean_text = _clean_json_text(raw_text)
-        return json.loads(clean_text)
-    except Exception as e:
-        logger.error(f"[ERR] Error al generar descripción por IA: {e}")
-        return {}
+    for attempt in range(max_retries):
+        try:
+            if USE_LOCAL_LLM:
+                client = openai.OpenAI(base_url=LOCAL_LLM_URL, api_key=LMSTUDIO_API_KEY)
+                response = client.chat.completions.create(
+                    model="local-model",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw_text = response.choices[0].message.content
+            else:
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                logger.info(f"[AI] Enviando petición bilingüe a Gemini para: {title}...")
+                response = client.models.generate_content(
+                    model='gemini-flash-latest',
+                    contents=prompt,
+                    config={'response_mime_type': 'application/json'}
+                )
+                logger.info("[AI] Respuesta recibida de Gemini.")
+                raw_text = response.text
+
+            clean_text = _clean_json_text(raw_text)
+            return json.loads(clean_text)
+
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Si es un error de cuota o servidor, reintentamos
+            if any(code in error_msg for code in ["503", "429", "RESOURCE_EXHAUSTED"]) and attempt < max_retries - 1:
+                wait_time = 15 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg else retry_delay
+                logger.warning(f"[WARN] Gemini (Bilingüe) respondió con error {error_msg[:20]}... Esperando {wait_time}s para reintentar ({attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"[ERR] Error al generar descripción por IA (Intento final): {e}")
+                return {}
+    
+    return {}
 
 
 def _call_local_llm(filename: str, extra_context: str = "") -> dict:

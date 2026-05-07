@@ -79,11 +79,13 @@ class HashDatabase:
             overview TEXT DEFAULT '', -- Sinopsis/Resumen (TMDB)
             overview_en TEXT DEFAULT '', -- Sinopsis/Resumen en inglés (TMDB)
             genres TEXT DEFAULT '', -- Géneros (TMDB/MusicBrainz)
+            genres_en TEXT DEFAULT '', -- Géneros en inglés 
             director TEXT DEFAULT '', -- Director (TMDB)
             cast TEXT DEFAULT '', -- Reparto/Actores (TMDB)
             original_title TEXT DEFAULT '', -- Título original (TMDB)
             collection TEXT DEFAULT '', -- Colección/Saga (TMDB)
-            keywords TEXT DEFAULT '' -- Palabras clave/Temas (TMDB)
+            keywords TEXT DEFAULT '', -- Palabras clave/Temas (TMDB)
+            keywords_en TEXT DEFAULT '' -- Palabras clave en inglés (TMDB)
         );
     """
 
@@ -118,12 +120,14 @@ class HashDatabase:
             overview,
             overview_en,
             genres,
+            genres_en,
             pages,
             director,
-            cast,
+            [cast],
             original_title,
             collection,
             keywords,
+            keywords_en,
             content='files',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
@@ -133,24 +137,24 @@ class HashDatabase:
     # Triggers para sincronización automática en tiempo real
     _CREATE_TRIGGER_AI_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.pages, new.director, new.cast, new.original_title, new.collection, new.keywords);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.genres_en, new.pages, new.director, new.[cast], new.original_title, new.collection, new.keywords, new.keywords_en);
         END;
     """
 
     _CREATE_TRIGGER_AD_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.pages, old.director, old.cast, old.original_title, old.collection, old.keywords);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.genres_en, old.pages, old.director, old.[cast], old.original_title, old.collection, old.keywords, old.keywords_en);
         END;
     """
 
     _CREATE_TRIGGER_AU_SQL = """
         CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
-          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.pages, old.director, old.cast, old.original_title, old.collection, old.keywords);
-          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords) 
-          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.pages, new.director, new.cast, new.original_title, new.collection, new.keywords);
+          INSERT INTO files_fts(files_fts, rowid, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en) 
+          VALUES('delete', old.id, old.file_name, old.official_title, old.author, old.languages, old.overview, old.overview_en, old.genres, old.genres_en, old.pages, old.director, old.[cast], old.original_title, old.collection, old.keywords, old.keywords_en);
+          INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en) 
+          VALUES (new.id, new.file_name, new.official_title, new.author, new.languages, new.overview, new.overview_en, new.genres, new.genres_en, new.pages, new.director, new.[cast], new.original_title, new.collection, new.keywords, new.keywords_en);
         END;
     """
 
@@ -192,6 +196,8 @@ class HashDatabase:
         "ALTER TABLE files ADD COLUMN original_title TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN collection TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN keywords TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN genres_en TEXT DEFAULT '';",
+        "ALTER TABLE files ADD COLUMN keywords_en TEXT DEFAULT '';",
         "ALTER TABLE files ADD COLUMN pages INTEGER DEFAULT 0;"
     ]
 
@@ -257,9 +263,9 @@ class HashDatabase:
         
         # Verificación de integridad de FTS5 (Recrear si faltan nuevas columnas)
         try:
-            self._conn.execute("SELECT original_title, collection, keywords, pages FROM files_fts LIMIT 1")
+            self._conn.execute("SELECT genres_en, keywords_en FROM files_fts LIMIT 1")
         except sqlite3.OperationalError:
-            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas (pages/original_title/collection/keywords)...")
+            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas bilingües (genres_en/keywords_en)...")
             self._conn.execute("DROP TABLE IF EXISTS files_fts")
 
         self._conn.execute(self._CREATE_FTS_TABLE_SQL)
@@ -282,8 +288,8 @@ class HashDatabase:
         if cursor.fetchone()[0] == 0:
 
             self._conn.execute("""
-                INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres)
-                SELECT id, file_name, official_title, author, languages, overview, overview_en, genres FROM files
+                INSERT INTO files_fts(rowid, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en)
+                SELECT id, file_name, official_title, author, languages, overview, overview_en, genres, genres_en, pages, director, [cast], original_title, collection, keywords, keywords_en FROM files
             """)
 
             self._conn.commit()
@@ -570,7 +576,8 @@ class HashDatabase:
             r"res:(\S+)":        lambda m: ("resolution", "LIKE ?", f"{m.group(1)}%", False),
             r"organized:(\S+)":  organized_handler,
             r"added:(\d+d|today)": date_handler,
-            r"genre:(\S+)":      lambda m: ("genres", "LIKE ?", f"%{m.group(1)}%", False),
+            r"genre:(\S+)":      lambda m: ("genres", "LIKE ? OR f.genres_en LIKE ?", (f"%{m.group(1)}%", f"%{m.group(1)}%"), False),
+            r"keyword:(\S+)":    lambda m: ("keywords", "LIKE ? OR f.keywords_en LIKE ?", (f"%{m.group(1)}%", f"%{m.group(1)}%"), False),
         }
         
         # 2. Extracción de filtros
@@ -605,7 +612,10 @@ class HashDatabase:
                     field_clauses.append(f"f.{col} {op} {val}")
                 else:
                     field_clauses.append(f"f.{col} {op}")
-                    params.append(val)
+                    if isinstance(val, (list, tuple)):
+                        params.extend(val)
+                    else:
+                        params.append(val)
             
             # Unimos los valores del mismo campo con OR
             if field_clauses:
@@ -653,9 +663,9 @@ class HashDatabase:
                 sql += " WHERE " + " AND ".join(where_clauses)
             
             # Ordenamos por BM25 con pesos (valores negativos: más negativo = más relevante)
-            # Pesos (importancia relativa): file_name, official_title, author, languages, overview, overview_en, genres, pages, director, cast, original_title, collection, keywords
+            # Pesos (importancia relativa): file_name (1.5), official_title(2.0), author(3.0), languages(0.5), overview(1.0), overview_en(1.0), genres(0.8), genres_en(0.8), pages(0.1), director(2.5), [cast](1.2), original_title(1.8), collection(2.2), keywords(2.0), keywords_en(2.0)
             if text_query:
-                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8, 0.1, 2.5, 1.2, 1.8, 2.2, 2.0) ASC"
+                sql += " ORDER BY bm25(files_fts, 1.5, 2.0, 3.0, 0.5, 1.0, 1.0, 0.8, 0.8, 0.1, 2.5, 1.2, 1.8, 2.2, 2.0, 2.0) ASC"
             else:
                 sql += " ORDER BY f.processed_at DESC"
             
@@ -850,45 +860,56 @@ class HashDatabase:
                 overview = meta.get("overview")
                 overview_en = meta.get("overview_en")
                 genres = meta.get("genres")
+                genres_en = meta.get("genres_en")
                 pages = meta.get("pages")
                 director = meta.get("director")
                 cast = meta.get("cast")
                 original_title = meta.get("original_title")
                 collection = meta.get("collection")
                 keywords = meta.get("keywords")
+                keywords_en = meta.get("keywords_en")
                 
                 # Fallback a api_data si están anidados
                 if not overview and isinstance(meta.get("api_data"), dict):
                     overview = meta["api_data"].get("overview")
                     overview_en = meta["api_data"].get("overview_en")
                     genres = meta["api_data"].get("genres")
+                    genres_en = meta["api_data"].get("genres_en")
                     pages = meta["api_data"].get("pages")
                     director = meta["api_data"].get("director")
                     cast = meta["api_data"].get("cast")
                     original_title = meta["api_data"].get("original_title")
                     collection = meta["api_data"].get("collection")
                     keywords = meta["api_data"].get("keywords")
+                    keywords_en = meta["api_data"].get("keywords_en")
 
-                # Normalizamos valores vacíos
-                overview = overview if overview else ""
-                overview_en = overview_en if overview_en else ""
-                genres = genres if genres else ""
+                # Normalizamos valores (unimos listas si es necesario)
+                def _norm(val):
+                    if isinstance(val, list):
+                        return ", ".join(map(str, val))
+                    return str(val) if val is not None else ""
+
+                overview = _norm(overview)
+                overview_en = _norm(overview_en)
+                genres = _norm(genres)
+                genres_en = _norm(genres_en)
                 pages = int(pages) if pages else 0
-                director = director if director else ""
-                cast = cast if cast else ""
-                original_title = original_title if original_title else ""
-                collection = collection if collection else ""
-                keywords = keywords if keywords else ""
+                director = _norm(director)
+                cast = _norm(cast)
+                original_title = _norm(original_title)
+                collection = _norm(collection)
+                keywords = _norm(keywords)
+                keywords_en = _norm(keywords_en)
 
-                if overview or overview_en or genres or pages or director or cast or original_title or collection or keywords:
+                if overview or overview_en or genres or genres_en or pages or director or cast or original_title or collection or keywords or keywords_en:
                     # Actualizamos la tabla files para este hash
                     # Solo actualizamos si la columna está vacía para no sobrescribir datos ya existentes
                     sql = """
                         UPDATE files 
-                        SET overview = ?, overview_en = ?, genres = ?, pages = ?, director = ?, cast = ?, original_title = ?, collection = ?, keywords = ?
+                        SET overview = ?, overview_en = ?, genres = ?, genres_en = ?, pages = ?, director = ?, [cast] = ?, original_title = ?, collection = ?, keywords = ?, keywords_en = ?
                         WHERE ed2k_hash = ? AND (overview = '' OR overview IS NULL)
                     """
-                    res = self._conn.execute(sql, (overview, overview_en, genres, pages, director, cast, original_title, collection, keywords, ed2k_hash))
+                    res = self._conn.execute(sql, (overview, overview_en, genres, genres_en, pages, director, cast, original_title, collection, keywords, keywords_en, ed2k_hash))
                     if res.rowcount > 0:
                         updated_count += res.rowcount
             except Exception as e:
@@ -950,18 +971,36 @@ class HashDatabase:
         # Duración (técnica)
         duration = metadata.get("technical", {}).get("duration_sec", 0)
 
+        # === NORMALIZACIÓN PARA SQL (Evitar error: type 'list' is not supported) ===
+        def _sql_norm(val):
+            if isinstance(val, list):
+                return ", ".join(map(str, val))
+            return str(val) if val is not None else ""
+
+        # Preparamos los valores normalizados
+        genres = _sql_norm(api_data.get("genres", ""))
+        genres_en = _sql_norm(api_data.get("genres_en", ""))
+        keywords = _sql_norm(api_data.get("keywords", ""))
+        keywords_en = _sql_norm(api_data.get("keywords_en", ""))
+        cast = _sql_norm(api_data.get("cast", ""))
+        director = _sql_norm(api_data.get("director", ""))
+        overview = _sql_norm(api_data.get("overview", ""))
+        overview_en = _sql_norm(api_data.get("overview_en", ""))
+        original_title_val = _sql_norm(api_data.get("original_title", ""))
+        collection_val = _sql_norm(api_data.get("collection", ""))
+
         # Query para actualizar (UPDATE) el registro
         cursor = self._conn.execute(
             """
             UPDATE files
             SET official_title=?, release_date=?, author=?, score=?, media_type=?, 
-                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, pages=?, overview=?, overview_en=?, genres=?, director=?, cast=?, original_title=?, collection=?, keywords=?
+                resolution=?, languages=?, subtitles=?, security_verdict=?, vt_url=?, final_path=?, is_organized=?, duration=?, pages=?, overview=?, overview_en=?, genres=?, genres_en=?, director=?, [cast]=?, original_title=?, collection=?, keywords=?, keywords_en=?
             WHERE fingerprint=? AND file_size=?
             """,
             (official_title, release_date, author, score, media_type,
              resolution, languages, subtitles, security_verdict, vt_url, final_path, is_organized, duration, 
-             api_data.get("pages"), api_data.get("overview", ""), api_data.get("overview_en", ""), api_data.get("genres", ""), api_data.get("director", ""), api_data.get("cast", ""), 
-             api_data.get("original_title", ""), api_data.get("collection", ""), api_data.get("keywords", ""), fingerprint, file_size)
+             api_data.get("pages"), overview, overview_en, genres, genres_en, director, cast, 
+             original_title_val, collection_val, keywords, keywords_en, fingerprint, file_size)
         )
 
         # Confirma los cambios
@@ -1194,8 +1233,8 @@ class HashDatabase:
                 score = float(scores[idx])
                 
                 # FILTRO DE RUIDO: Si la similitud es muy baja, la ignoramos para evitar "basura"
-                # Subimos de 0.20 a 0.28 para reducir ruido en resultados secundarios (posiciones 5-10)
-                if score < 0.28 or fid in seen_ids:
+                # Bajamos de 0.28 a 0.25 para capturar traducciones multilingües (ej: Big Brother -> Gran Hermano)
+                if score < 0.25 or fid in seen_ids:
                     continue
                 
                 record = self.get_file_by_id(fid)
@@ -1309,14 +1348,27 @@ class HashDatabase:
                     
                     # CASO ESPECIAL: Si solo hay un resultado o todos empatan (rango = 0)
                     if logit_range <= 0 or max_logit == min_logit:
-                        # Si es el único, le damos el máximo de la escala de rerank (80)
+                        # Si es el único, le damos el máximo posible
                         normalized = 80.0
                     else:
                         # Normalización lineal mapeada a [5, 80]
                         normalized = 5.0 + ((raw - min_logit) / logit_range) * 75.0
+                    
+                    # --- SALVAGUARDA DE RELEVANCIA ABSOLUTA ---
+                    # Si el mejor logit es muy bajo (ej: < -5.0), significa que el modelo 
+                    # no está seguro de que NADA sea realmente relevante. 
+                    # En ese caso, bajamos el techo de la puntuación para no engañar al usuario.
+                    if max_logit < -8.0:
+                        cap = 20.0
+                    elif max_logit < -4.0:
+                        cap = 40.0
+                    elif max_logit < 0:
+                        cap = 70.0
+                    else:
+                        cap = 80.0
                         
                     r['relevance_score'] = raw
-                    r['display_score'] = min(80.0, max(5.0, normalized))
+                    r['display_score'] = min(cap, max(5.0, normalized))
                     r['max_observed_score'] = max_logit
         else:
             # Fallback a RRF normal si no hay IA

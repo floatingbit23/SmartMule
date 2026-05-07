@@ -114,6 +114,10 @@ class MetadataEngine:
                     logger.info(f"[RETRY] Reintentando búsqueda con datos corregidos por IA: '{data.get('title')}' ({data.get('media_type')})...")
                     self._enrich_with_apis(data, filename, technical_target)
 
+        # Función que asegura tener metadatos (sinopsis, géneros, etiquetas) en español e inglés
+        self._ensure_bilingual_metadata(data)
+
+        # Función que muestra un resumen de los metadatos obtenidos
         self._log_metadata_card(data)
 
         # Guardamos en caché
@@ -459,8 +463,19 @@ class MetadataEngine:
             else:
                 data["media_type"] = "movie"
 
-            # Extraemos géneros bilingües usando el cliente
-            genres_str = self.tmdb.get_genre_names(api_result.get("genre_ids", []))
+            # Extraemos géneros bilingües usando el cliente y los separamos
+            raw_genres = self.tmdb.get_genre_names(api_result.get("genre_ids", []))
+            genres_es = []
+            genres_en = []
+            
+            if raw_genres:
+                for g in raw_genres.split(", "):
+                    if " | " in g:
+                        parts = g.split(" | ")
+                        genres_es.append(parts[0])
+                        genres_en.append(parts[1])
+                    else:
+                        genres_es.append(g)
 
             # Guardamos los datos obtenidos de TMDB
             data["api_data"] = {
@@ -471,7 +486,8 @@ class MetadataEngine:
                 "poster_url": poster,
                 "overview": api_result.get("overview"),
                 "overview_en": api_result.get("overview_en"),
-                "genres": genres_str,
+                "genres": ", ".join(genres_es),
+                "genres_en": ", ".join(genres_en),
                 "director": api_result.get("director", ""),
                 "cast": api_result.get("cast", ""),
                 "original_title": api_result.get("original_title", ""),
@@ -737,6 +753,7 @@ class MetadataEngine:
                     "date": final_year,
                     "score": norm_score,
                     "overview": overview,
+                    "overview_en": ai_enrich.get("overview_en") if 'ai_enrich' in locals() else None,
                     "genres": genres_str,
                     "pages": pages,
                     "cast": ", ".join(display_people[:10]) if isinstance(display_people, list) else str(display_people),
@@ -1040,3 +1057,58 @@ class MetadataEngine:
         title = re.sub(r'\s+', ' ', title).strip().strip('-').strip()
 
         return title if title.lower() != original_title.lower() else None
+
+    # Función que asegura tener metadatos críticos tanto en español como en inglés.
+    def _ensure_bilingual_metadata(self, data: dict):
+        """
+        Asegura que tengamos sinopsis, géneros y etiquetas tanto en español como en inglés.
+        Si falta alguno, pide a la IA que traduzca el existente o genere uno nuevo.
+        """
+        api_data = data.get("api_data")
+        if not api_data:
+            return
+
+        # Campos a comprobar (par bilingüe)
+        fields_to_check = [
+            ("overview", "overview_en"),
+            ("genres", "genres_en"),
+            ("keywords", "keywords_en")
+        ]
+
+        needs_ai = False
+        context_parts = []
+
+        for es_key, en_key in fields_to_check:
+            val_es = api_data.get(es_key)
+            val_en = api_data.get(en_key)
+            
+            if (val_es and not val_en) or (val_en and not val_es):
+                needs_ai = True
+                context_parts.append(f"{es_key.upper()}: {val_es or val_en}")
+
+        if not needs_ai:
+            return
+
+        logger.info("[AI] Refuerzo bilingüe: Detectada asimetría en metadatos. Invocando IA...")
+        
+        title = api_data.get("official_title") or data.get("title")
+        author = api_data.get("author") or data.get("author")
+        media_type = data.get("media_type")
+        context_text = " | ".join(context_parts)
+
+        ai_data = analyze_media_content(title, author, media_type, context_text)
+        
+        if ai_data:
+            
+            for es_key, en_key in fields_to_check:
+
+                # Solo sobreescribimos si faltaba el dato original
+                if not api_data.get(es_key) and ai_data.get(es_key):
+
+                    api_data[es_key] = ai_data.get(es_key)
+                    logger.info(f"    [OK] {es_key.capitalize()} (ES) generado por IA.")
+                
+                if not api_data.get(en_key) and ai_data.get(en_key):
+
+                    api_data[en_key] = ai_data.get(en_key)
+                    logger.info(f"    [OK] {en_key.capitalize()} (EN) generado por IA.")

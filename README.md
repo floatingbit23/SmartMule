@@ -313,6 +313,8 @@ pip install -r requirements-semantic.txt
 
 - **Re-Ranking de Alta Precisión (_Cross-Encoder_)**: Los mejores 10 resultados pasan por una segunda capa de IA (_Cross-Encoder_) que analiza la relación real entre tu búsqueda y el contenido, marcando los aciertos más probables con la etiqueta **🧠✨ AI+**.
 
+- **Refuerzo Bilingüe Automático**: Si un archivo carece de sinopsis en español o inglés tras consultar las APIs oficiales, la IA genera o traduce automáticamente la versión faltante. Esto garantiza que términos como "_Big Brother_" encuentren resultados aunque el archivo solo tenga metadatos en español ("_Gran Hermano_") y viceversa.
+
 Ejemplo de uso:
 ```bash
 smartmule --search "space" 
@@ -325,6 +327,10 @@ Tras la primera instalación o si añades muchos archivos, puedes construir el �
 ```bash
 smartmule --build-index
 ```
+
+**Nota**: Se han empleado los siguientes modelos de IA optimizados para ONNX:
+- `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`: Generación de embeddings multilingües (_Bi-Encoder_) para la búsqueda semántica rápida.
+- `Xenova/ms-marco-MiniLM-L-6-v2`: Refinamiento de resultados (_Cross-Encoder_) para el re-ranking de alta precisión (Etiqueta **AI+**).
 
 ---
 

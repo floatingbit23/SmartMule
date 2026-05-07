@@ -324,6 +324,8 @@ pip install -r requirements-semantic.txt
 
 - **High-Precision Re-Ranking (_Cross-Encoder_)**: Top results pass through a second AI layer (_Cross-Encoder_) that evaluates the actual relationship between your query and the content, marking the best matches with the **🧠✨ AI+** badge.
 
+- **Automatic Bilingual Enhancement**: If a file lacks a synopsis in Spanish or English after consulting the official APIs, the AI will automatically generate or translate the missing version. This ensures that terms like "_Big Brother_" find results even if the file only has metadata in Spanish ("_Gran Hermano_") and vice versa.
+
 Usage Example:
 ```bash
 smartmule --search "space" 
@@ -336,6 +338,10 @@ After the first installation or adding many files, you can build the vector inde
 ```bash
 smartmule --build-index
 ```
+
+**Note**: The following AI models (optimized for ONNX) are used:
+- `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`: Multilingual embedding generation (_Bi-Encoder_) for fast semantic search.
+- `Xenova/ms-marco-MiniLM-L-6-v2`: Result refinement (_Cross-Encoder_) for high-precision re-ranking (**AI+** badge).
 
 ---
 

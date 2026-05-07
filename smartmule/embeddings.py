@@ -233,19 +233,21 @@ def build_metadata_text(record: dict) -> str:
 
     parts = []
     
-    # Añadimos piezas de información si están disponibles
+    # 1. Nombre de archivo original (Prioridad Máxima)
+    if record.get("file_name"):
+        parts.append(f"Archivo: {record['file_name']}")
 
-    # 1. Tipo de contenido (ej: "Película", "Serie", "Música")
+    # 2. Tipo de contenido (ej: "Película", "Serie", "Música")
     m_type = record.get("media_type", "").capitalize()
 
     if m_type and m_type != "Unknown":
         parts.append(m_type)
 
-    # 2. Título oficial
+    # 3. Título oficial
     if record.get("official_title"):
         parts.append(record["official_title"])
         
-    # 3. Año de lanzamiento
+    # 4. Año de lanzamiento
     if record.get("release_date"):
 
         # (Extraemos solo el año para no confundir al modelo con días/meses irrelevantes)
@@ -254,26 +256,26 @@ def build_metadata_text(record: dict) -> str:
         if year:
             parts.append(f"({year})")
 
-    # 4. Autor / Director / Artista
+    # 5. Autor / Director / Artista
     if record.get("author"):
         parts.append(f"de {record['author']}")
     
     if record.get("director") and record.get("director") != record.get("author"):
         parts.append(f"Dirigida por {record['director']}")
 
-    # 5. Géneros
+    # 6. Géneros
     if record.get("genres"):
         parts.append(record["genres"])
 
-    # 6. Idiomas
+    # 7. Idiomas
     if record.get("languages"):
         parts.append(f"Idiomas: {record['languages']}")
         
-    # 7. Resolución (ej: "1080p")
+    # 8. Resolución (ej: "1080p")
     if record.get("resolution"):
         parts.append(record["resolution"])
         
-    # 8. Puntuación (Convertimos valor numérico a concepto semántico)
+    # 9. Puntuación (Convertimos valor numérico a concepto semántico)
     score = record.get("score", 0)
 
     if score:
@@ -292,17 +294,13 @@ def build_metadata_text(record: dict) -> str:
         except (ValueError, TypeError):
             pass
 
-    # 9. Sinopsis/Descripción (Español)
+    # 10. Sinopsis/Descripción (Español)
     if record.get("overview"):
         parts.append(record["overview"])
 
-    # 10. Sinopsis/Descripción (Inglés) - Solo si existe Y es diferente a la de español (para evitar redundancia en el embedding)
+    # 11. Sinopsis/Descripción (Inglés) - Solo si existe Y es diferente a la de español (para evitar redundancia en el embedding)
     if record.get("overview_en") and record.get("overview_en") != record.get("overview"):
         parts.append(record["overview_en"])
-    
-    # 11. Nombre de archivo original (como red de seguridad para etiquetas técnicas/grupos)
-    if record.get("file_name"):
-        parts.append(f"Archivo: {record['file_name']}")
     
     # Si hay metadatos, los unimos con puntos para separar conceptos
     return ". ".join(parts) if parts else record.get("file_name", "")
@@ -354,8 +352,9 @@ def rerank_results(query: str, results: List[Dict[str, Any]], model_name: str = 
     passages = []
 
     for r in results:
-        # Intentamos obtener el texto semántico que ya generamos al indexar
-        text = r.get('metadata_text') or build_metadata_text(r)
+        # Re-construimos el texto dinámicamente para asegurar que el orden de los campos 
+        # (ej: nombre de archivo primero) sea el óptimo para el modelo de re-ranking actual.
+        text = build_metadata_text(r)
         passages.append(text)
         
     # 2. Ejecutamos la inferencia (ONNX Runtime -> Reranking)
