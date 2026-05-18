@@ -49,7 +49,9 @@ Copy `.env.example` to `.env` and configure paths and API keys.
 - `smartmule/database.py`: Persists file status, metadata, and fingerprints.
 
 ### Key Logic: Tie-Breaking & Search
+
 - **Tie-Breaking**: When an LLM provides multiple matches for a title, SmartMule uses `ffprobe` to compare file duration against TMDB data to select the correct production.
+
 - **Fuzzy Search Optimization**: To prevent Python-based N+1 bottlenecks, fuzzy searches in `database.py` use a **SQL length pre-filter** (`LENGTH(...) BETWEEN X AND Y`) before calling the expensive Levenshtein function.
 
 ### Key Logic: Parallel Hashing (Performance)

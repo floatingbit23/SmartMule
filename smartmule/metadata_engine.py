@@ -576,7 +576,7 @@ class MetadataEngine:
 
             return best_res, max_sim, best_author_match
 
-        autor_ia = data.get("author", "").lower()
+        autor_ia = (data.get("author") or "").lower()
 
         # Intento 1: Título Limpio (Español)
         api_result, best_similitud, autor_match = _get_best_result(titulo_limpio, autor_ia)

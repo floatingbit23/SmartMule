@@ -426,6 +426,225 @@ def search_files(query: str) -> None:
         db.close()
 
 
+def play_media(query: str) -> None:
+
+    """Busca un archivo y, si es de tipo video, lo reproduce utilizando VLC."""
+
+    # Comprueba si están disponibles los modelos de IA (búsqueda semántica). Si no, usa búsqueda léxica normal.
+    from smartmule.embeddings import is_available
+    semantic_ready = is_available()
+    
+    db = HashDatabase(DB_PATH)
+
+    try:
+
+        if semantic_ready and query.strip():
+            results = db.search_hybrid(query) # Híbrida
+        else:
+            results = db.search_by_name(query) # Léxica normal
+            
+        if not results:
+            if not query:
+                print("\n[i] No hay archivos registrados en la biblioteca.\n")
+            else:
+                print(f"\n[!] No se encontraron coincidencias para '{query}'.\n")
+            return
+            
+        # Filtramos resultados que sean de tipo vídeo (películas, series y vídeos en general)
+        video_results = [
+            r for r in results 
+            if r.get('media_type', 'unknown').upper() in ["MOVIE", "SERIES", "VIDEO"]
+        ]
+        
+        if not video_results:
+            print(f"\n[!] Ninguna de las coincidencias para '{query}' es de tipo vídeo.\n")
+            return
+            
+        # Tomamos el mejor resultado (el primero)
+        target = video_results[0]
+        title = target.get('official_title') or target.get('file_name', 'Unknown')
+        
+        # Intentamos usar la ruta final (organizada) en Library\...
+        target_path = target.get('final_path')
+
+        # Si no existe la ruta final, intentamos usar la original (carpeta Incoming\).
+        if not target_path or not Path(target_path).exists():
+            target_path = target.get('file_path')
+                
+        if not target_path or not Path(target_path).exists():
+            print(f"\n[!] El archivo de '{title}' ya no se encuentra físicamente en el disco.\n")
+            return
+            
+
+        print(f"\n[▶️]  Abriendo VLC para reproducir: {title}")
+        
+        import subprocess
+
+        # Rutas comunes de VLC en Windows
+        vlc_paths = [
+            r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+            r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
+        ]
+        
+        # 1. Intentamos localizar vlc en el PATH primero
+        vlc_exe = shutil.which("vlc")
+        
+        # 1b. Si no lo encuentra ahí, probamos rutas de Windows
+        if not vlc_exe:
+            for p in vlc_paths:
+                if Path(p).exists():
+                    vlc_exe = p
+                    break
+                    
+        # 2. Si encontramos VLC, lo abrimos
+        if vlc_exe:
+            subprocess.Popen([vlc_exe, str(target_path)])
+        # Si no, abrimos con el predeterminado del sistema
+        else:
+            print("\n[!] VLC no encontrado en el PATH ni en las rutas estándar.")
+            print("[i] Abriendo con el reproductor predeterminado del sistema...\n")
+
+            # En Windows abrimos con os.startfile, en Mac con open y en Linux con xdg-open. Se abrirá con el programa
+            # que el usuario tenga configurado por defecto para abrir archivos multimedia.
+
+            if sys.platform == "win32": # Windows
+                os.startfile(target_path)
+            elif sys.platform == "darwin": # Mac
+                subprocess.Popen(["open", str(target_path)])
+            else: # Linux
+                subprocess.Popen(["xdg-open", str(target_path)])
+                
+    except Exception as e:
+        print(f"\n[ERR] Error al intentar reproducir el medio: {e}\n")
+        
+    finally:
+        db.close()
+
+
+def open_media(query: str) -> None:
+
+    """Busca cualquier archivo y lo abre con la aplicación preferida configurada en .env o el SO de forma segura."""
+
+    import shlex
+    import subprocess
+
+    from smartmule.embeddings import is_available
+    semantic_ready = is_available()
+    
+    db = HashDatabase(DB_PATH)
+
+    try:
+        if semantic_ready and query.strip():
+            results = db.search_hybrid(query)
+        else:
+            results = db.search_by_name(query)
+            
+        if not results:
+            if not query:
+                print("\n[i] No hay archivos registrados en la biblioteca.\n")
+            else:
+                print(f"\n[!] No se encontraron coincidencias para '{query}'.\n")
+            return
+            
+        # 1. Tomamos el primer resultado (el mejor)
+        target = results[0]
+        title = target.get('official_title') or target.get('file_name', 'Unknown')
+        media_type = target.get('media_type', 'unknown').upper()
+        
+        # 2. Guardrail de Seguridad: Bloqueamos ejecutables / archivos en cuarentena / archivos en revisión
+        if media_type in ["SOFTWARE", "QUARANTINE", "REVIEW", "00_QUARANTINE", "01_REVIEW"]:
+            print(f"\n[⚠️ ANTIMALWARE] Por motivos de seguridad, no se permite abrir archivos de tipo '{media_type}' ({title}) desde la CLI.\n")
+            return
+            
+        # 3. Intentamos usar la ruta final (organizada) en Library\...
+        target_path = target.get('final_path')
+        if not target_path or not Path(target_path).exists():
+            target_path = target.get('file_path')
+            
+        if not target_path or not Path(target_path).exists():
+            print(f"\n[!] El archivo de '{title}' ya no se encuentra físicamente en el disco.\n")
+            return
+            
+        # 4. Determinar la aplicación preferida según la categoría en .env (Soporte flexible Singular/Plural)
+        app_path = None
+        app_args = ""
+        
+        if media_type in ["MOVIE", "SERIES", "VIDEO", "AUDIO", "MUSIC"]:
+            app_path = os.getenv("MEDIA_PLAYER_PATH")
+            app_args = os.getenv("MEDIA_PLAYER_ARGS", "")
+        elif media_type in ["BOOK", "BOOKS"]:
+            app_path = os.getenv("EBOOK_READER_PATH")
+            app_args = os.getenv("EBOOK_READER_ARGS", "")
+        elif media_type in ["IMAGE", "IMAGES"]:
+            app_path = os.getenv("IMAGE_VIEWER_PATH")
+            app_args = os.getenv("IMAGE_VIEWER_ARGS", "")
+        elif media_type == "DOCUMENTS":
+            app_path = os.getenv("DOCUMENT_EDITOR_PATH")
+            app_args = os.getenv("DOCUMENT_EDITOR_ARGS", "")
+        elif media_type == "COMPRESSED":
+            app_path = os.getenv("ARCHIVE_MANAGER_PATH")
+            app_args = os.getenv("ARCHIVE_MANAGER_ARGS", "")
+            
+        launched = False
+        
+        # 5. Intentamos lanzar con la aplicación preferida (si está configurada y existe)
+        if app_path and Path(app_path).exists():
+
+            try:
+                exec_args = [app_path]
+
+                if app_args:
+                    exec_args.extend(shlex.split(app_args))
+
+                exec_args.append(str(target_path))
+                print(f"\n[📂] Abriendo con aplicación preferida: {title} ({media_type})")
+
+                subprocess.Popen(exec_args)
+
+                launched = True
+
+            except Exception as ex:
+                print(f"[!] No se pudo abrir con la aplicación preferida: {ex}. Reintentando con el S.O...")
+                
+        # 6. Fallback A: Para multimedia, si no hay app preferida, intentar autodetectar VLC
+        if not launched and media_type in ["MOVIE", "SERIES", "VIDEO", "MUSIC"]:
+            vlc_paths = [
+                r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
+            ]
+            vlc_exe = shutil.which("vlc")
+            if not vlc_exe:
+                for p in vlc_paths:
+                    if Path(p).exists():
+                        vlc_exe = p
+                        break
+            if vlc_exe:
+                try:
+                    print(f"\n[▶️] Abriendo VLC para reproducir: {title}")
+                    subprocess.Popen([vlc_exe, str(target_path)])
+                    launched = True
+                except Exception:
+                    pass
+                    
+        # 7. Fallback B: Para cualquier tipo de archivo, si no se pudo abrir, usar el predeterminado del sistema operativo
+        if not launched:
+
+            print(f"\n[📂] Abriendo con el visor predeterminado del sistema: {title} ({media_type})")
+
+            if sys.platform == "win32": # Windows
+                os.startfile(target_path)
+            elif sys.platform == "darwin": # Mac
+                subprocess.Popen(["open", str(target_path)])
+            else: # Linux
+                subprocess.Popen(["xdg-open", str(target_path)])
+                
+    except Exception as e:
+        print(f"\n[ERR] Error al intentar abrir el archivo: {e}\n")
+        
+    finally:
+        db.close()
+
+
 # Función principal para purgar archivos
 def purge_files(query: str, select_all: bool = False, no_preserve: bool = False) -> None:
 
@@ -880,6 +1099,8 @@ COMANDOS DE SERVICIO:
 
 HERRAMIENTAS DE BÚSQUEDA:
   --search [query]  Búsqueda Híbrida Inteligente (Semántica + Léxica) en la biblioteca.
+  --play [query]    Busca el mejor resultado de tipo vídeo y lo reproduce en VLC.
+  --open [query]    Busca cualquier archivo y lo abre con su aplicación preferida o del S.O. (seguro).
   --purge [query]   Busca y elimina archivos de la BBDD y del disco físico.
   --reprocess [q]   Invalida metadatos para forzar un nuevo análisis (Regex/IA/API).
     --all                 (Purga/Reprocess) Selecciona automáticamente todos los resultados.
@@ -904,6 +1125,8 @@ EJEMPLOS DE USO:
   > smartmule --search "Matrix"                     # Búsqueda léxica por título o nombre
   > smartmule --search "naves espaciales y suspense"  # Búsqueda semántica por conceptos
   > smartmule --search "type:movie score>8"         # Búsqueda avanzada con filtros
+  > smartmule --play "Matrix"                       # Reproducir película Matrix con VLC
+  > smartmule --open "El Quijote"                   # Abrir libro/PDF de El Quijote con lector favorito/S.O.
   > smartmule --stats                               # Ver inventario y estadísticas
   > smartmule --build-index                         # Construir índice semántico para búsqueda por IA
   > smartmule --status                              # Chequear salud del sistema
@@ -930,6 +1153,8 @@ EJEMPLOS DE USO:
 
     # Interfaz de Flags modernas
     parser.add_argument("--search", nargs="?", const=True, help=argparse.SUPPRESS)
+    parser.add_argument("--play", nargs="?", const=True, help=argparse.SUPPRESS)
+    parser.add_argument("--open", nargs="?", const=True, help=argparse.SUPPRESS)
     parser.add_argument("--purge", nargs="?", const=True, help=argparse.SUPPRESS)
     parser.add_argument("--reprocess", nargs="?", const=True, help=argparse.SUPPRESS)
     parser.add_argument("--stats", action="store_true", help=argparse.SUPPRESS)
@@ -1000,6 +1225,18 @@ EJEMPLOS DE USO:
     if args.search is not None:
         query = args.search if isinstance(args.search, str) else (args.query_pos or "")
         search_files(query)
+        sys.exit(0)
+
+    # 2.6b Acción PLAY: Reproducir el mejor vídeo coincidente
+    if args.play is not None:
+        query = args.play if isinstance(args.play, str) else (args.query_pos or "")
+        play_media(query) # Ejecuta el método de reproducción con VLC.
+        sys.exit(0)
+
+    # 2.6c Acción OPEN: Abrir el mejor archivo coincidente con aplicación preferida o del S.O.
+    if args.open is not None:
+        query = args.open if isinstance(args.open, str) else (args.query_pos or "")
+        open_media(query) # Ejecuta el método de apertura segura.
         sys.exit(0)
 
     # 2.7 Acción BACKFILL: Sincronizar metadatos antiguos (FTS5)

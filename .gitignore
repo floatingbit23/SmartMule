@@ -49,3 +49,5 @@ scratch/
 
 # SonarQube local
 .sonar
+
+docs/

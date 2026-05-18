@@ -59,12 +59,19 @@ SmartMule organiza tus archivos en las siguientes categorías automáticas dentr
 *   **Desempate Inteligente (Tie-Breaking)**: Utiliza un sistema de scoring heurístico basado en el año de estreno y la duración técnica (FFmpeg) para distinguir entre películas homónimas (ej: Solaris 1972 vs Solaris 2002).
 
 *   **Búsqueda Inteligente (FTS5)**: Motor de búsqueda global integrado con soporte para filtros avanzados. Localiza cualquier archivo por título, tipo, puntuación, resolución, género o fecha al instante. 
+
     ```bash
     smartmule --search "Matrix"               # Búsqueda por nombre o título
     smartmule --search "type:movie score>8"  # Búsqueda con filtros de tipo y nota
     smartmule --search "res:1080p genre:scifi" # Filtros por resolución y género
     smartmule --search "verdict:safe"          # Solo archivos verificados como seguros
     smartmule --search "added:today"           # Archivos añadidos en las últimas 24h
+    ```
+
+*   **Reproducción Integrada (VLC)**: Permite lanzar contenidos multimedia directamente desde tu consola mediante el flag `--play`. El sistema filtra automáticamente las coincidencias de tipo vídeo (películas, series...) y abre el mejor resultado asíncronamente en *VLC Media Player* sin bloquear tu terminal (con soporte de _fallback_ al reproductor por defecto en caso de no encontrarse VLC).
+
+    ```bash
+    smartmule --play "Matrix"                  # Reproduce en VLC el primer vídeo que coincida
     ```
 
 *   **Triaje Automático**: 
@@ -151,6 +158,8 @@ Una vez configurado el alias, puedes usar estos comandos desde cualquier carpeta
 | `smartmule stop` | Detiene el servicio de forma segura. |
 | `smartmule restart` | Reinicia el motor (Stop + Start). |
 | `smartmule --search "..."` | Búsqueda inteligente (Híbrida) con filtros. |
+| `smartmule --play "..."` | Busca un archivo de vídeo y lo reproduce en _VLC Media Player_. |
+| `smartmule --open "..."` | Abre cualquier archivo (música, libros, comprimidos...) con su aplicación preferida de forma segura. |
 | `smartmule --build-index` | Reconstruir el índice semántico (IA). |
 | `smartmule --stats` | Inventario y estadísticas de almacenamiento. |
 | `smartmule --status` | Chequeo de salud y dependencias. |
@@ -328,7 +337,7 @@ Tras la primera instalación o si añades muchos archivos, puedes construir el �
 smartmule --build-index
 ```
 
-**Nota**: Se han empleado los siguientes modelos de IA optimizados para ONNX:
+**Nota**: Se han empleado los siguientes modelos de IA optimizados para ONNX (_Open Neural Network Exchange_):
 - `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`: Generación de embeddings multilingües (_Bi-Encoder_) para la búsqueda semántica rápida.
 - `Xenova/ms-marco-MiniLM-L-6-v2`: Refinamiento de resultados (_Cross-Encoder_) para el re-ranking de alta precisión (Etiqueta **AI+**).
 

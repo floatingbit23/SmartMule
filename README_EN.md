@@ -74,6 +74,12 @@ SmartMule organizes your files into the following automatic categories within yo
     smartmule --search "added:today"           # Files added in the last 24h
     ```
 
+*   **Integrated Playback (VLC)**: Allows you to instantly play media files directly from your terminal using the `--play` flag. The system automatically filters video matches (movies, series...) and opens the best result asynchronously in *VLC Media Player* without blocking your console (with default system player fallback if VLC is not found).
+
+    ```bash
+    smartmule --play "Matrix"                  # Play the first matching video in VLC
+    ```
+
 *   **Privacy**: Compatible with local models (LM Studio) to process names without uploading them to the cloud.
 
 *   **Ultra-low resource usage**: SmartMule is designed to run in the background without interfering with normal PC usage. It sets minimal I/O (`IOPRIO_VERYLOW`) and CPU (`IDLE_PRIORITY_CLASS`) priorities, ensuring the OS only allocates resources when no other applications are demanding them. Additionally, it uses **SQLite WAL mode** to allow instant searches even while the engine is organizing heavy files.
@@ -150,6 +156,8 @@ Once the alias is configured, you can use these commands from any folder:
 | `smartmule stop` | Safely stops the service. |
 | `smartmule restart` | Restarts the engine (Stop + Start). |
 | `smartmule --search "..."` | Intelligent (Hybrid) search with filters. |
+| `smartmule --play "..."` | Searches for a video file and plays it in _VLC Media Player_. |
+| `smartmule --open "..."` | Opens any file (music, books, archives...) safely using your preferred application. |
 | `smartmule --build-index` | Rebuild the semantic index (AI). |
 | `smartmule --stats` | Library inventory and storage statistics. |
 | `smartmule --status` | Health check and dependencies. |
