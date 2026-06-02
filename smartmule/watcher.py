@@ -102,7 +102,8 @@ class IncomingHandler(FileSystemEventHandler):
         para no procesar "fantasmas" y evitar logs innecesarios.
         """
         
-        src_path = Path(event.src_path)
+        src_path_str = event.src_path.decode('utf-8') if isinstance(event.src_path, bytes) else event.src_path
+        src_path = Path(src_path_str)
         top_level_item = self._get_top_level_item(src_path)
         
         if top_level_item:
@@ -141,7 +142,8 @@ class IncomingHandler(FileSystemEventHandler):
             event: Evento de movimiento con src_path (origen) y dest_path (destino).
         """
         # Identificamos el ítem de nivel superior en Incoming
-        top_level_item = self._get_top_level_item(event.dest_path)
+        dest_path_str = event.dest_path.decode('utf-8') if isinstance(event.dest_path, bytes) else event.dest_path
+        top_level_item = self._get_top_level_item(Path(dest_path_str))
         if top_level_item:
             logger.debug(f"Ítem movido/renombrado en Incoming: {top_level_item.name}")
             self._reset_timer(top_level_item)
@@ -156,14 +158,15 @@ class IncomingHandler(FileSystemEventHandler):
         Args:
             event: El evento del sistema de archivos.
         """
-        src_path = Path(event.src_path)
+        src_path_str = event.src_path.decode('utf-8') if isinstance(event.src_path, bytes) else event.src_path
+        src_path = Path(src_path_str)
         # Identificamos el ítem de nivel superior (la carpeta o el archivo en la raíz de Incoming)
         top_level_item = self._get_top_level_item(src_path)
         
         if not top_level_item:
             return
 
-        file_path = Path(event.src_path)
+        file_path = src_path
 
         # Verifico si la extensión del archivo está en mi lista de ignorados.
         # Necesito comprobar tanto el sufijo simple (.part) como los compuestos

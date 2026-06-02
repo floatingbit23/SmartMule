@@ -17,26 +17,26 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         # Probamos en las últimas versiones estables de Python
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-    - name: 📥 Clonar repositorio
+    - name: Clonar repositorio
       uses: actions/checkout@v4
 
-    - name: 🐍 Configurar Python ${{ matrix.python-version }}
+    - name: Configurar Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: 📦 Instalar dependencias
+    - name: Instalar dependencias
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    - name: 🧪 Ejecutar tests con Pytest
+    - name: Ejecutar tests con Pytest
       run: |
         # Ejecutamos todos los tests recursivamente en la carpeta tests/
         # Usamos -v para ver los detalles de cada test en los logs de GitHub.

@@ -3,7 +3,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from smartmule.parsers.regex_parser import parse_filename, EXTENSION_MAPPING
 from smartmule.parsers.llm_parser import parse_with_llm, analyze_media_content
@@ -48,7 +48,7 @@ class MetadataEngine:
 
 
     # Método para identificar el archivo o carpeta
-    def identify_file(self, filename: str, filepath: str = None, ed2k_hash: str = None) -> dict:
+    def identify_file(self, filename: str, filepath: Optional[str] = None, ed2k_hash: Optional[str] = None) -> dict:
         """
         Orquestación de la identificación: Regex -> Análisis IA -> API.
         Ahora soporta carpetas buscando un archivo representante.
@@ -131,7 +131,7 @@ class MetadataEngine:
 
 
     # Función que gestiona la lógica de si es un directorio o archivo, y la selección del archivo representante.
-    def _resolve_target(self, filename: str, filepath: str) -> tuple[str, str, str]:
+    def _resolve_target(self, filename: str, filepath: Optional[str]) -> tuple[str, str, Optional[str]]:
 
         # Se inicializan los valores de nombre, display y target
         item_path = Path(filepath) if filepath else Path(filename)
@@ -219,7 +219,7 @@ class MetadataEngine:
 
     # Función que inspecciona archivos comprimidos.
     # Devuelve un booleano para indicar si el proceso debe abortarse por seguridad.
-    def _inspect_compressed(self, data: dict, filename: str, technical_target: str) -> bool:
+    def _inspect_compressed(self, data: dict, filename: str, technical_target: Optional[str]) -> bool:
 
         media_type = data.get("media_type")
 
@@ -263,7 +263,7 @@ class MetadataEngine:
 
 
     # Función que enriquece los datos con información de APIs externas.
-    def _enrich_with_apis(self, data: dict, filename: str, technical_target: str):
+    def _enrich_with_apis(self, data: dict, filename: str, technical_target: Optional[str]):
 
         """
         Delegador principal que, dependiendo del "media_type", redirige el tráfico a métodos ultra-específicos:
@@ -297,15 +297,22 @@ class MetadataEngine:
 
 
     # Función que realiza la búsqueda en TMDB y aplica scoring.
-    def _query_tmdb(self, data: dict, titulo_limpio: str, year: str):
+    def _query_tmdb(self, data: dict, titulo_limpio: str, year: Optional[Union[str, int]]):
+
+        year_int = None
+        if year:
+            try:
+                year_int = int(year)
+            except ValueError:
+                pass
 
         if data.get("season"):
             logger.info("[TV] Buscando en TMDB como Serie...")
-            results = self.tmdb.search_tv(titulo_limpio, year) 
+            results = self.tmdb.search_tv(titulo_limpio, year_int) 
 
         else:
             logger.info("[MOVIE] Buscando en TMDB como Película...")
-            results = self.tmdb.search_movie(titulo_limpio, year)
+            results = self.tmdb.search_movie(titulo_limpio, year_int)
 
         if not results:
             titulo_alternativo = self._get_plan_b_title(titulo_limpio)
@@ -314,10 +321,10 @@ class MetadataEngine:
                 logger.info(f"[RETRY] Plan B: Reintentando búsqueda sin 'AKA' -> '{titulo_alternativo}'")
 
                 if data.get("season"):
-                    results = self.tmdb.search_tv(titulo_alternativo, year)
+                    results = self.tmdb.search_tv(titulo_alternativo, year_int)
 
                 else:
-                    results = self.tmdb.search_movie(titulo_alternativo, year)
+                    results = self.tmdb.search_movie(titulo_alternativo, year_int)
 
         """
         Sistema de Scoring Heurístico para Desempate (Tie-Breaking):
@@ -551,7 +558,7 @@ class MetadataEngine:
 
                 if is_strong_match and not best_was_strong:
                     update = True # El primer match fuerte siempre gana a lo anterior
-                elif is_strong_match and best_was_strong:
+                elif is_strong_match and best_was_strong and best_res is not None:
                     # Desempate entre dos matches fuertes: Prioridad absoluta a la antigüedad
                     current_year = res.get("first_publish_year")
                     best_year = best_res.get("first_publish_year")
@@ -631,7 +638,7 @@ class MetadataEngine:
                 data["media_type"] = "book"
 
                 # --- MEJORA: Preferencia de Alfabeto Latino ---
-                def _is_latin(text: str) -> bool:
+                def _is_latin(text: Optional[str]) -> bool:
                     if not text: return True
                     # Comprueba si el texto contiene caracteres fuera del rango latino extendido
                     return all(ord(c) < 0x0370 for c in text)
@@ -671,7 +678,7 @@ class MetadataEngine:
 
                 # --- Fase de Enriquecimiento profundo (Sinopsis, Personajes, Lugares, Sagas) ---
                 work_key = api_result.get("key")
-                details = self.openlibrary.get_book_details(work_key) if work_key else {}
+                details = (self.openlibrary.get_book_details(work_key) or {}) if work_key else {}
 
                 # Combinamos temas, personajes y lugares
                 subjects = api_result.get("subject", [])
@@ -730,6 +737,7 @@ class MetadataEngine:
                 
                 overview = details.get("description") or api_result.get("overview", "")
                 
+                ai_enrich = None
                 if not overview or len(overview) < 10:
                     logger.info("    [AI] OpenLibrary sin sinopsis. Invocando IA de refuerzo...")
                     ai_enrich = analyze_media_content(data["title"], data["author"], media_type="book")
@@ -753,7 +761,7 @@ class MetadataEngine:
                     "date": final_year,
                     "score": norm_score,
                     "overview": overview,
-                    "overview_en": ai_enrich.get("overview_en") if 'ai_enrich' in locals() else None,
+                    "overview_en": ai_enrich.get("overview_en") if ai_enrich else None,
                     "genres": genres_str,
                     "pages": pages,
                     "cast": ", ".join(display_people[:10]) if isinstance(display_people, list) else str(display_people),
@@ -804,7 +812,7 @@ class MetadataEngine:
             # Si la similitud es alta o contiene el título, se guarda.
             else:
                 # --- MEJORA: Promoción de tipo oficial y Normalización Latina ---
-                def _is_latin(text: str) -> bool:
+                def _is_latin(text: Optional[str]) -> bool:
                     if not text: return True
                     return all(ord(c) < 0x0370 for c in text)
 
@@ -848,7 +856,7 @@ class MetadataEngine:
 
 
     # Función que realiza el triaje de seguridad del archivo.
-    def _scan_software(self, data: dict, filename: str, technical_target: str):
+    def _scan_software(self, data: dict, filename: str, technical_target: Optional[str]):
 
         internal_name = data.get("internal_representative")
         target_info = f"-> [{internal_name}]" if internal_name else ""
@@ -1091,9 +1099,9 @@ class MetadataEngine:
 
         logger.info("[AI] Refuerzo bilingüe: Detectada asimetría en metadatos. Invocando IA...")
         
-        title = api_data.get("official_title") or data.get("title")
-        author = api_data.get("author") or data.get("author")
-        media_type = data.get("media_type")
+        title = api_data.get("official_title") or data.get("title") or ""
+        author = api_data.get("author") or data.get("author") or ""
+        media_type = data.get("media_type") or "unknown"
         context_text = " | ".join(context_parts)
 
         ai_data = analyze_media_content(title, author, media_type, context_text)

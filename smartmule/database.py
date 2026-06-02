@@ -28,7 +28,7 @@ es el núcleo de toda la inteligencia de descubrimiento del proyecto.
 import re # Para el soporte de expresiones regulares en la búsqueda
 import sqlite3 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union # Para indicar que una función puede devolver None o varios tipos
  
@@ -39,17 +39,10 @@ class HashDatabase:
 
     """
     Gestiono la caché SQLite de hashes ED2K procesados.
-
-    La tabla 'files' almacena:
-    - La ruta y el nombre del archivo procesado.
-    - Su tamaño en bytes.
-    - Su hash ED2K en formato hexadecimal.
-    - El enlace ed2k:// generado.
-    - La fecha y hora en que fue procesado.
     """
 
     # Sentencia SQL para crear la tabla si no existe
-    # Uso 'CREATE TABLE IF NOT EXISTS' para que sea idempotente (se puede llamar múltiples veces sin error).
+    # Uso 'CREATE TABLE IF NOT EXISTS' para que sea idempotente
     
     _CREATE_TABLE_SQL = """
         CREATE TABLE IF NOT EXISTS files (
@@ -171,35 +164,7 @@ class HashDatabase:
         );
     """
 
-    # Migraciones para añadir columnas a bases de datos antiguas de forma segura
-    _MIGRATIONS = [
-        "ALTER TABLE files ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN file_mtime INTEGER DEFAULT 0;",
-        "ALTER TABLE files ADD COLUMN official_title TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN release_date TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN author TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN score REAL DEFAULT 0;",
-        "ALTER TABLE files ADD COLUMN media_type TEXT DEFAULT 'unknown';",
-        "ALTER TABLE files ADD COLUMN resolution TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN languages TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN subtitles TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN security_verdict TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN vt_url TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN final_path TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN is_organized INTEGER DEFAULT 0;",
-        "ALTER TABLE files ADD COLUMN duration INTEGER DEFAULT 0;",
-        "ALTER TABLE files ADD COLUMN overview TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN overview_en TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN genres TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN director TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN cast TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN original_title TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN collection TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN keywords TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN genres_en TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN keywords_en TEXT DEFAULT '';",
-        "ALTER TABLE files ADD COLUMN pages INTEGER DEFAULT 0;"
-    ]
+
 
     # Índice compuesto (dos columnas) sobre la huella y el tamaño para búsquedas instantáneas e inequívocas (O(log n)).
     # NO es UNIQUE para evitar riesgo de colisiones de hashes SHA256 (aunque sean muy improbables).
@@ -227,10 +192,11 @@ class HashDatabase:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
 
         # Habilitamos el modo WAL (Write-Ahead Logging) para mejorar la concurrencia.
-        # Esto permite que el Watcher y el Worker operen simultáneamente sin bloqueos 'database is locked'.
+        # Permite que el Watcher y el Worker operen simultáneamente sin bloqueos del tipo 'database is locked'.
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
-        self._conn.execute("PRAGMA foreign_keys = ON;") # Para relaciones entre tablas.
+        self._conn.execute("PRAGMA foreign_keys = ON;") # Para relaciones entre tablas
+        # La tabla 'media_embeddings' está vinculada a la tabla 'files' mediante una foreign key (file_id -> id)
  
         # Devuelvo filas personalizadas que se comportan como diccionarios. Esto facilita el acceso por nombre de columna
         self._conn.row_factory = sqlite3.Row
@@ -247,13 +213,7 @@ class HashDatabase:
         self._conn.execute(self._CREATE_CACHE_TABLE_SQL)
         
 
-        # 2º. MIGRACIONES: Aseguro que las columnas necesarias existan antes de indexar
 
-        for sql in self._MIGRATIONS: # Lista de sentencias SQL de migración
-            try:
-                self._conn.execute(sql) # Ejecuto la sentencia SQL
-            except sqlite3.OperationalError: 
-                pass # Si hay error, lo ignoro (la columna ya existía)
 
 
         # 3º. ÍNDICES Y BÚSQUEDA: Ahora que las columnas existen seguro, creamos la infraestructura FTS5.
@@ -261,12 +221,7 @@ class HashDatabase:
         
         # Infraestructura de búsqueda inteligente (FTS5 + Triggers)
         
-        # Verificación de integridad de FTS5 (Recrear si faltan nuevas columnas)
-        try:
-            self._conn.execute("SELECT genres_en, keywords_en FROM files_fts LIMIT 1")
-        except sqlite3.OperationalError:
-            logger.info("[MIGRATE] Recreando índice FTS5 para incluir nuevas columnas bilingües (genres_en/keywords_en)...")
-            self._conn.execute("DROP TABLE IF EXISTS files_fts")
+
 
         self._conn.execute(self._CREATE_FTS_TABLE_SQL)
         self._conn.execute("DROP TRIGGER IF EXISTS files_ai")
@@ -537,6 +492,7 @@ class HashDatabase:
         Ejemplo: "type:movie type:tv score>7.5 res:1080p verdict:safe added:today organized:y" ->
         "Busca películas O series que tengan una puntuación mayor a 7.5, sean de resolución 1080p, tengan un veredicto seguro, hayan sido añadidas hoy y estén organizadas."
         """
+        OP_LIKE = "LIKE ?"
         grouped_raw = {} # { "col": [ (op, val, is_raw), ... ] }
         remaining = raw_query
         
@@ -567,13 +523,13 @@ class HashDatabase:
             if val == "safe":
                 # Lógica: (f.security_verdict = 'SAFE' OR (f.security_verdict = '' AND f.media_type IN ('movie', 'series', 'video', 'audio', 'image', 'book', 'document')))
                 return ("security_verdict", "= 'SAFE' OR (f.security_verdict = '' AND f.media_type IN ('movie', 'series', 'video', 'audio', 'image', 'book', 'document'))", "", True)
-            return ("security_verdict", "LIKE ?", f"{val.upper()}%", False)
+            return ("security_verdict", OP_LIKE, f"{val.upper()}%", False)
 
         filter_patterns = {
-            r"type:(\S+)":       lambda m: ("media_type", "LIKE ?", f"{m.group(1).lower()}%", False),
+            r"type:(\S+)":       lambda m: ("media_type", OP_LIKE, f"{m.group(1).lower()}%", False),
             r"score([><=]+)([\d.]+)": lambda m: ("score", f"{m.group(1)} ?", float(m.group(2)), False),
             r"verdict:(\S+)":    verdict_handler,
-            r"res:(\S+)":        lambda m: ("resolution", "LIKE ?", f"{m.group(1)}%", False),
+            r"res:(\S+)":        lambda m: ("resolution", OP_LIKE, f"{m.group(1)}%", False),
             r"organized:(\S+)":  organized_handler,
             r"added:(\d+d|today)": date_handler,
             r"genre:(\S+)":      lambda m: ("genres", "LIKE ? OR f.genres_en LIKE ?", (f"%{m.group(1)}%", f"%{m.group(1)}%"), False),
@@ -687,12 +643,12 @@ class HashDatabase:
 
             return results
 
-        except Exception as e:
-            logger.error(f"[ERR] Error en búsqueda: {e}")
+        except Exception:
+            logger.exception("[ERR] Error en búsqueda")
             return []
 
 
-    def _search_by_regexp(self, query: str, filter_conditions: list = None, filter_params: list = None) -> list[dict]:
+    def _search_by_regexp(self, query: str, filter_conditions: Optional[list] = None, filter_params: Optional[list] = None) -> list[dict]:
         
         """
         Fallback basado en expresiones regulares para soportar wildcards (* y ?) y regex avanzados.
@@ -732,7 +688,8 @@ class HashDatabase:
         if filter_conditions:
             for cond in filter_conditions:
                 sql += f" AND {cond}"
-            all_params.extend(filter_params)
+            if filter_params:
+                all_params.extend(filter_params)
             
         sql += " ORDER BY processed_at DESC"
         
@@ -740,12 +697,12 @@ class HashDatabase:
             cursor = self._conn.execute(sql, tuple(all_params))
             return [dict(row) for row in cursor.fetchall()]
 
-        except Exception as e:
-            logger.error(f"[ERR]  Error en búsqueda Regex/Wildcard con filtros '{query}': {e}")
+        except Exception:
+            logger.exception(f"[ERR]  Error en búsqueda Regex/Wildcard con filtros '{query}'")
             return []
 
 
-    def _search_fuzzy(self, query: str, filter_conditions: list = None, filter_params: list = None, max_distance: int = 2) -> list[dict]:
+    def _search_fuzzy(self, query: str, filter_conditions: Optional[list] = None, filter_params: Optional[list] = None, max_distance: int = 2) -> list[dict]:
        
         """
         Fuzzy Search inteligente. 
@@ -788,15 +745,16 @@ class HashDatabase:
         if filter_conditions:
             for cond in filter_conditions:
                 sql += f" AND {cond}"
-            all_params.extend(filter_params)
+            if filter_params:
+                all_params.extend(filter_params)
             
         sql += " ORDER BY dist ASC, processed_at DESC LIMIT 10"
         
         try:
             cursor = self._conn.execute(sql, tuple(all_params))
             return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"[ERR]  Error en búsqueda inteligente para '{query}': {e}")
+        except Exception:
+            logger.exception(f"[ERR]  Error en búsqueda inteligente para '{query}'")
             return []
 
 
@@ -839,13 +797,6 @@ class HashDatabase:
         import json
         
         logger.info("[BACKFILL] Iniciando migración de metadatos desde la caché...")
-        
-        # Migración: Columna 'pages' (Fase 2.5)
-        try:
-            self._conn.execute("SELECT pages FROM files LIMIT 1")
-        except sqlite3.OperationalError:
-            logger.info("[MIGRATE] Añadiendo columna 'pages' a la tabla files...")
-            self._conn.execute("ALTER TABLE files ADD COLUMN pages INTEGER")
         
         # 1. Obtenemos todos los registros de la caché que tienen metadatos
         cursor = self._conn.execute("SELECT ed2k_hash, metadata FROM metadata_cache")
@@ -912,8 +863,8 @@ class HashDatabase:
                     res = self._conn.execute(sql, (overview, overview_en, genres, genres_en, pages, director, cast, original_title, collection, keywords, keywords_en, ed2k_hash))
                     if res.rowcount > 0:
                         updated_count += res.rowcount
-            except Exception as e:
-                logger.error(f"[ERROR] No se pudo parsear metadata para {ed2k_hash}: {e}")
+            except Exception:
+                logger.exception(f"[ERROR] No se pudo parsear metadata para {ed2k_hash}")
                 
         self._conn.commit()
         if updated_count > 0:
@@ -1025,8 +976,8 @@ class HashDatabase:
                 # Llamamos a la lógica de indexación semántica
                 self.upsert_embedding(file_id, dict(row))
 
-        except Exception as e:
-            logger.error(f"[ERR]  No se pudo disparar la vectorización automática para {fingerprint[:8]}: {e}")
+        except Exception:
+            logger.exception(f"[ERR]  No se pudo disparar la vectorización automática para {fingerprint[:8]}")
 
         
 
@@ -1090,8 +1041,8 @@ class HashDatabase:
             cursor = self._conn.execute("SELECT COUNT(*) FROM media_embeddings")
             stats["vectorized_count"] = cursor.fetchone()[0]
             
-        except Exception as e:
-            logger.error(f"[ERR]  Error al obtener estadísticas de la BBDD: {e}")
+        except Exception:
+            logger.exception("[ERR]  Error al obtener estadísticas de la BBDD")
         
         return stats
 
@@ -1110,8 +1061,8 @@ class HashDatabase:
             import json
             try:
                 return json.loads(row['metadata'])
-            except Exception as e:
-                logger.error(f"[ERR]  Error parseando JSON de caché para hash {ed2k_hash}: {e}")
+            except Exception:
+                logger.exception(f"[ERR]  Error parseando JSON de caché para hash {ed2k_hash}")
                 return None
         return None
 
@@ -1132,8 +1083,8 @@ class HashDatabase:
             self._conn.execute(sql, (ed2k_hash, metadata_json, now_str))
             self._conn.commit()
             logger.debug(f"[SAVE] Metadatos cacheados para hash {ed2k_hash}")
-        except Exception as e:
-            logger.error(f"[ERR]  Error guardando en metadata_cache para {ed2k_hash}: {e}")
+        except Exception:
+            logger.exception(f"[ERR]  Error guardando en metadata_cache para {ed2k_hash}")
 
 
     # --- GESTIÓN DE MODELOS SEMÁNTICOS ---
@@ -1245,8 +1196,8 @@ class HashDatabase:
 
             return results
 
-        except Exception as e:
-            logger.error(f"[ERR]  Fallo crítico en búsqueda semántica: {e}")
+        except Exception:
+            logger.exception("[ERR]  Fallo crítico en búsqueda semántica")
             return []
 
 
@@ -1280,7 +1231,7 @@ class HashDatabase:
             semantic_results = self.search_semantic(query, limit=max(50, limit * 2))
 
         # 2. Fusión de Rangos (Weighted RRF)
-        rrf_map = {} # {file_id: rrf_score}
+        rrf_map: dict[int, float] = {} # {file_id: rrf_score}
         record_map = {} # {file_id: record}
 
         # Procesamos resultados de FTS5 (si existen)
@@ -1418,8 +1369,8 @@ class HashDatabase:
             
             return True
             
-        except Exception as e:
-            logger.error(f"[ERR]  Fallo al procesar embedding para archivo ID {file_id}: {e}")
+        except Exception:
+            logger.exception(f"[ERR]  Fallo al procesar embedding para archivo ID {file_id}")
             return False
 
 
@@ -1447,8 +1398,8 @@ class HashDatabase:
 
             logger.debug(f"[SAVE] Embedding vectorial guardado para ID {file_id}")
 
-        except Exception as e:
-            logger.error(f"[ERR]  Error guardando embedding para ID {file_id}: {e}")
+        except Exception:
+            logger.exception(f"[ERR]  Error guardando embedding para ID {file_id}")
 
 
     # Función de cierre de la BBDD SQLite

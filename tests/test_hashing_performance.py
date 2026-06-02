@@ -21,6 +21,25 @@ def test_performance_hashing_10gb(tmp_path):
     
     # Creamos un archivo sparse (rápido y sin ocupar espacio real)
     with open(test_file, "wb") as f:
+        if os.name == 'nt':
+            try:
+                import ctypes
+                FSCTL_SET_SPARSE = 0x000900C4
+                kernel32 = ctypes.windll.kernel32
+                msvcrt = ctypes.CDLL('msvcrt')
+                handle = msvcrt._get_osfhandle(f.fileno())
+                if handle != -1:
+                    dwBytesReturned = ctypes.c_ulong()
+                    kernel32.DeviceIoControl(
+                        handle,
+                        FSCTL_SET_SPARSE,
+                        None, 0,
+                        None, 0,
+                        ctypes.byref(dwBytesReturned),
+                        None
+                    )
+            except Exception:
+                pass
         f.seek(SIZE_10GB - 1)
         f.write(b"\0")
     

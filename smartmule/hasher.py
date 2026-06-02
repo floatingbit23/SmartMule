@@ -263,8 +263,8 @@ def calculate_fingerprint(path: Path, file_size: int) -> str:
 
         return sha.hexdigest().upper() # Devuelvo el hash en formato hexadecimal y en mayúsculas
 
-    except OSError as e:
-        logger.error(f"[!] Error al calcular fingerprint de {path.name}: {e}")
+    except OSError:
+        logger.exception(f"[!] Error al calcular fingerprint de {path.name}")
         return "" 
 
 

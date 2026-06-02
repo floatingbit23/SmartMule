@@ -44,7 +44,7 @@ def is_available() -> bool:
     """
 
     try:
-        import fastembed  # noqa: F401
+        import fastembed  # noqa: F401 (para evitar error de que no se usa la importación. No se usa porque está en imports absolutos.)
         return _HAS_NUMPY
     except ImportError:
         return False
@@ -98,7 +98,7 @@ def encode_text(text: str, model_name: str) -> bytes:
     
     # FastEmbed devuelve un generador (un objeto que produce los resultados en una lista real)
     # Extraemos el primer (y único) vector de la lista generada con '[0]'
-    vector = list(model.embed([text]))[0]
+    vector = next(iter(model.embed([text])))
 
     # NumPy trabaja en 64 bits (float64) por defecto. Convertimos a 32 bits (float32) para ahorrar el 50% de espacio en disco.
     # tobytes() convierte el array de NumPy a bytes para guardarlo en un campo BLOB de SQLite.
@@ -328,7 +328,7 @@ def _load_rerank_model(model_name: str):
     return _rerank_model
 
 
-def rerank_results(query: str, results: List[Dict[str, Any]], model_name: str = None) -> List[Dict[str, Any]]:
+def rerank_results(query: str, results: List[Dict[str, Any]], model_name: Optional[str] = None) -> List[Dict[str, Any]]:
 
     """
     Refina los resultados de la búsqueda usando un Cross-Encoder para mayor precisión.
@@ -365,7 +365,7 @@ def rerank_results(query: str, results: List[Dict[str, Any]], model_name: str = 
     for i, score in enumerate(scores):
 
         # Actualizamos el score de relevancia
-        results[i]['rerank_score'] = float(score)
+        results[i]['rerank_score'] = score
 
         # Marcamos que este resultado ha sido "verificado" por el Cross-Encoder.
         results[i]['is_reranked'] = True

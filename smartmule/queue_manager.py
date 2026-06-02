@@ -175,11 +175,10 @@ class QueueManager:
             else:
                 file_size = file_path.stat().st_size
 
-        except OSError as e:
+        except OSError:
             # Si no puedo obtener el tamaño (por lo que sea), lo registro y aborto. 
-            logger.error(
-                f"[ERR]  No pude obtener información de '{file_path.name}': {e}. "
-                f"Abortando encolado..."  # No tiene sentido meter en la cola algo que no puedo leer.
+            logger.exception(
+                f"[ERR]  No pude obtener información de '{file_path.name}'. Abortando encolado..."
             )
             return
 
@@ -301,11 +300,10 @@ class QueueManager:
             try:
                 self._process_callback(task)
 
-            except Exception as e:
+            except Exception:
 
-                logger.error(
-                    f"[ERR]  Error procesando '{Path(task.file_path).name}': {e}",
-                    exc_info=True, # Muestro el traceback completo
+                logger.exception(
+                    f"[ERR]  Error procesando '{Path(task.file_path).name}'"
                 )
 
             # Bloque finally: limpieza del estado
@@ -328,7 +326,7 @@ class QueueManager:
         logger.info("[i]  Worker detenido limpiamente")
 
 
-    def _evaluate_cache_state(self, file_path: Path, fingerprint: str, file_size: int) -> tuple[bool, bool, dict]:
+    def _evaluate_cache_state(self, file_path: Path, fingerprint: str, file_size: int) -> tuple[bool, bool, Optional[dict]]:
 
         """
         Comprueba la caché por Huella Digital (Fingerprint).

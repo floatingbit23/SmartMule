@@ -74,8 +74,8 @@ class LibraryOrganizer:
             # Si el veredicto es "SAFE", se mueve el archivo a la carpeta de biblioteca.
             return self._handle_clean_file(source_path, filename, metadata, api_data, media_type)
 
-        except Exception as e:
-            logger.error(f"[ERR] Fallo organizando {filename}: {e}")
+        except Exception:
+            logger.exception(f"[ERR] Fallo organizando {filename}")
             return file_path_str
 
 
@@ -324,7 +324,7 @@ class LibraryOrganizer:
             
             else:
                 # Si falla por otra razón (ej. disco lleno), abortamos para evitar corrupción o saturación
-                logger.error(f"[ERR] Fallo crítico del Sistema de Archivos al crear el hardlink: {e}")
+                logger.exception("[ERR] Fallo crítico del Sistema de Archivos al crear el hardlink")
                 raise
 
 

@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 from plyer import notification # Importamos la librería para enviar notificaciones nativas (plyer es multiplataforma)
 
 logger = logging.getLogger("SmartMule.notifications")
@@ -20,12 +21,17 @@ def send_notification(title: str, message: str, is_critical: bool = False):
         # Definimos el tiempo de la notificación (más largo si es crítica)
         timeout = 10 if is_critical else 5
         
-        notification.notify( # Envía la notificación 
-            title=f"SmartMule - {title}",
-            message=message,
-            app_name="SmartMule", 
-            timeout=timeout
-        )
+        notifier: Any = notification
+        
+        if notifier is not None:
+            notifier.notify( # Envía la notificación 
+                title=f"SmartMule - {title}",
+                message=message,
+                app_name="SmartMule", 
+                timeout=timeout
+            )
+        else:
+            logger.debug("[INFO]  Notificaciones no disponibles en esta plataforma.")
 
     except Exception as e:
         # Las notificaciones pueden fallar en entornos sin GUI o si faltan dependencias del SO (e.g. en Linux headless).
