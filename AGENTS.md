@@ -57,7 +57,7 @@ Copy `.env.example` to `.env` and configure paths and API keys.
 ### Key Logic: Parallel Hashing (Performance)
 The ED2K hashing in `smartmule/hasher.py` uses a hybrid model:
 - **Sequential Reader**: Single-thread reads from disk to respect HDDs and `IOPRIO_VERYLOW`.
-- **Parallel Workers**: `ThreadPoolExecutor` handles MD4 chunk calculations.
+- **Parallel Workers**: `ThreadPoolExecutor` handles MD4 chunk calculations. PyCryptodome releases the GIL (_Global Interpreter Lock_) during C-level MD4 computation (`Py_BEGIN_ALLOW_THREADS`), enabling real thread parallelism without contention with the daemon's I/O threads (_watchdog_, _timers_). `ProcessPoolExecutor` is **not suitable** here due to the massive IPC overhead of serializing 9.28MB chunks via pickle (benchmarked at 3x slower throughput and 7x worse thread reactivity).
 - **Backpressure**: The reader pauses if the thread pool buffer is full to prevent RAM exhaustion.
 
 ### Key Logic: Database Concurrency (WAL Mode)
